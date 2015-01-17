@@ -1,0 +1,78 @@
+<!doctype html>
+<html>
+<head>
+<style>
+    * {
+        font-family:"Courier New";
+        font-size:11px;
+    }
+    
+    textarea { 
+        position:absolute;
+        padding:10px;
+        margin:0px;
+        white-space:nowrap;
+    }
+    
+    div {
+        margin:0px;
+        padding:10px;
+    }
+    
+    pre {
+        margin:0px;
+        padding:10px;
+    }
+    
+    #input { 
+        left:10px;
+        top:10px;
+        width:500px;
+        height:500px;
+        box-sizing:border-box;
+    }
+    
+    #results { 
+        position:absolute;
+        border:1px solid black;
+        left:520px;
+        top:10px;
+        width:500px;
+        height:500px;
+        box-sizing:border-box;
+        overflow-y:scroll;
+    }
+    
+    #tokens { 
+        overflow-y:scroll;
+        border:1px solid black;
+        position:absolute;
+        left:10px;
+        top:520px;
+        width:1010px;
+        height:200px;    
+        box-sizing:border-box;
+    }
+    
+    #lexerTime { 
+        position:absolute;
+        left:1020px;
+        top:10px;
+    }
+    #parseTime { 
+        position:absolute;
+        left:1020px;
+        top:26px;
+    }
+</style>
+<script src="//code.jquery.com/jquery-1.11.2.min.js"></script>
+<script src='profiler.js'></script>
+</head>
+<body>
+    <div id='lexerTime'></div>
+    <div id='parseTime'></div>
+    <textarea id='input' style=''></textarea>
+    <pre id='results' style=''></pre>
+    <div id='tokens' style=''></div>
+</body>
+</html>

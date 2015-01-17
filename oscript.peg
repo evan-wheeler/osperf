@@ -1,0 +1,589 @@
+{
+  var TYPES_TO_PROPERTY_NAMES = {
+    CallExpression:   "callee",
+    MemberExpression: "object",
+  };
+
+  function filledArray(count, value) {
+    var result = new Array(count), i;
+
+    for (i = 0; i < count; i++) {
+      result[i] = value;
+    }
+
+    return result;
+  }
+
+  function extractOptional(optional, index) {
+    return optional ? optional[index] : null;
+  }
+
+  function extractList(list, index) {
+    var result = new Array(list.length), i;
+
+    for (i = 0; i < list.length; i++) {
+      result[i] = list[i][index];
+    }
+
+    return result;
+  }
+
+  function buildList(first, rest, index) {
+    return [first].concat(extractList(rest, index));
+  }
+
+  function buildTree(first, rest, builder) {
+    var result = first, i;
+
+    for (i = 0; i < rest.length; i++) {
+      result = builder(result, rest[i]);
+    }
+
+    return result;
+  }
+
+  function buildBinaryExpression(first, rest) {
+    return buildTree(first, rest, function(result, element) {
+      return {
+        type:     "BinaryExpression",
+        operator: element[1],
+        left:     result,
+        right:    element[3]
+      };
+    });
+  }
+
+  function buildLogicalExpression(first, rest) {
+    return buildTree(first, rest, function(result, element) {
+      return {
+        type:     "LogicalExpression",
+        operator: element[1],
+        left:     result,
+        right:    element[3]
+      };
+    });
+  }
+
+  function optionalList(value) {
+    return value !== null ? value : [];
+  }
+}
+
+Start
+  = _ program:Program _ { return program; }
+
+LiteralStatement
+  = str:AssignmentExpression _ EOS { return { type: 'statement', value: str } }  
+
+PrimaryExpression
+  = ThisToken { return { type: "ThisExpression" }; }
+  / Identifier
+  / Literal
+  / array:ArrayLiteral { return array; }
+  / "(" _ expression:Expression _ ")" { return expression; }  
+
+ArrayLiteral
+  = "{" _ "}" {
+      return {
+        type:     "ArrayExpression",
+        elements: []
+      };
+    }
+  / "{" _ elements:ElementList _ "}" {
+      return {
+        type:     "ArrayExpression",
+        elements: elements
+      };
+    }
+
+ElementList
+  = first:(
+      _ element:AssignmentExpression {
+        return element;
+      }
+    )
+    rest:(
+      _ "," _ element:AssignmentExpression {
+        return element;
+      }
+    )*
+    { return Array.prototype.concat.apply(first, rest); }  
+
+MemberExpression
+  = first:(
+        PrimaryExpression
+      / FunctionExpression
+    )
+    rest:(
+        _ "[" _ property:Expression _ "]" {
+          return { property: property, computed: true };
+        }
+      / _ "." _ property:IdentifierName {
+          return { property: property, computed: false };
+        }
+    )*
+    {
+      return buildTree(first, rest, function(result, element) {
+        return {
+          type:     "MemberExpression",
+          object:   result,
+          property: element.property,
+          computed: element.computed
+        };
+      });
+    }
+    
+CallExpression
+  = first:(
+      callee:MemberExpression _ args:Arguments {
+        return { type: "CallExpression", callee: callee, arguments: args };
+      }
+    )
+    rest:(
+        _ args:Arguments {
+          return { type: "CallExpression", arguments: args };
+        }
+      / _ "[" _ property:Expression _ "]" {
+          return {
+            type:     "MemberExpression",
+            property: property,
+            computed: true
+          };
+        }
+      / _ "." _ property:IdentifierName {
+          return {
+            type:     "MemberExpression",
+            property: property,
+            computed: false
+          };
+        }
+    )*
+    {
+      return buildTree(first, rest, function(result, element) {
+        element[TYPES_TO_PROPERTY_NAMES[element.type]] = result;
+
+        return element;
+      });
+    }
+
+Arguments
+  = "(" _ args:(ArgumentList _)? ")" {
+      return optionalList(extractOptional(args, 0));
+    }
+
+ArgumentList
+  = first:AssignmentExpression rest:(_ "," _ AssignmentExpression)* {
+      return buildList(first, rest, 3);
+    }    
+
+LeftHandSideExpression
+  = CallExpression
+
+PostfixExpression
+  = argument:LeftHandSideExpression _ operator:PostfixOperator {
+      return {
+        type:     "UpdateExpression",
+        operator: operator,
+        argument: argument,
+        prefix:   false
+      };
+    }
+  / LeftHandSideExpression
+
+PostfixOperator
+  = "++"
+  / "--"
+
+UnaryExpression
+  = PostfixExpression
+  / operator:UnaryOperator _ argument:UnaryExpression {
+      var type = (operator === "++" || operator === "--")
+        ? "UpdateExpression"
+        : "UnaryExpression";
+
+      return {
+        type:     type,
+        operator: operator,
+        argument: argument,
+        prefix:   true
+      };
+    }
+
+UnaryOperator
+  =  "++"
+  / "--"
+  / $("+" !"=")
+  / $("-" !"=")
+  / $("~" !"=")
+  / "!"
+  / "@"
+  / $("$" !"$")
+  / "$$"
+
+MultiplicativeExpression
+  = first:UnaryExpression
+    rest:(_ MultiplicativeOperator _ UnaryExpression)*
+    { return buildBinaryExpression(first, rest); }
+
+MultiplicativeOperator
+  = $("*" !"=")
+  / $("/" !"=")
+  / $("%" !"=")
+
+AdditiveExpression
+  = first:MultiplicativeExpression
+    rest:(_ AdditiveOperator _ MultiplicativeExpression)*
+    { return buildBinaryExpression(first, rest); }
+
+AdditiveOperator
+  = $("+" ![+=])
+  / $("-" ![-=])
+
+ShiftExpression
+  = first:AdditiveExpression
+    rest:(_ ShiftOperator _ AdditiveExpression)*
+    { return buildBinaryExpression(first, rest); }
+
+ShiftOperator
+  = $("<<"  !"=")
+  / $(">>"  !"=")
+
+RelationalExpression
+  = first:ShiftExpression
+    rest:(_ RelationalOperator _ ShiftExpression)*
+    { return buildBinaryExpression(first, rest); }
+
+RelationalOperator
+  = "<="
+  / ">="
+  / $("<" !"<")
+  / $(">" !">")
+  / $InToken
+  
+EqualityExpression
+  = first:RelationalExpression
+    rest:(_ EqualityOperator _ RelationalExpression)*
+    { return buildBinaryExpression(first, rest); }
+
+EqualityOperator
+  = "=="
+  / "!="
+
+BitwiseANDExpression
+  = first:EqualityExpression
+    rest:(_ BitwiseANDOperator _ EqualityExpression)*
+    { return buildBinaryExpression(first, rest); }
+
+BitwiseANDOperator
+  = $("&" ![&=])
+
+BitwiseXORExpression
+  = first:BitwiseANDExpression
+    rest:(_ BitwiseXOROperator _ BitwiseANDExpression)*
+    { return buildBinaryExpression(first, rest); }
+
+BitwiseXOROperator
+  = $("^" !"=")
+
+BitwiseORExpression
+  = first:BitwiseXORExpression
+    rest:(_ BitwiseOROperator _ BitwiseXORExpression)*
+    { return buildBinaryExpression(first, rest); }
+
+BitwiseOROperator
+  = $("|" ![|=])
+
+LogicalANDExpression
+  = first:BitwiseORExpression
+    rest:(_ LogicalANDOperator _ BitwiseORExpression)*
+    { return buildBinaryExpression(first, rest); }
+
+LogicalANDOperator
+  = "&&"
+   / AndToken
+
+LogicalORExpression
+  = first:LogicalANDExpression
+    rest:(_ LogicalOROperator _ LogicalANDExpression)*
+    { return buildBinaryExpression(first, rest); }
+
+LogicalOROperator
+  = "||"
+   / OrToken
+
+ConditionalExpression
+  = test:LogicalORExpression _
+    "?" _ consequent:AssignmentExpression _
+    ":" _ alternate:AssignmentExpression
+    {
+      return {
+        type:       "ConditionalExpression",
+        test:       test,
+        consequent: consequent,
+        alternate:  alternate
+      };
+    }
+  / LogicalORExpression
+
+  AssignmentExpression
+  = left:LeftHandSideExpression _
+    "=" !"=" _
+    right:AssignmentExpression
+    {
+      return {
+        type:     "AssignmentExpression",
+        operator: "=",
+        left:     left,
+        right:    right
+      };
+    }
+  / left:LeftHandSideExpression _
+    operator:AssignmentOperator _
+    right:AssignmentExpression
+    {
+      return {
+        type:     "AssignmentExpression",
+        operator: operator,
+        left:     left,
+        right:    right
+      };
+    }
+  / ConditionalExpression
+
+AssignmentOperator
+  = "*="
+  / "/="
+  / "~="
+  / "%="
+  / "+="
+  / "-="
+  / "<<="
+  / ">>="
+  / "&="
+  / "^="
+  / "|="
+
+Expression
+  = first:AssignmentExpression rest:(_ "," _ AssignmentExpression)* {
+      return rest.length > 0
+        ? { type: "SequenceExpression", expressions: buildList(first, rest, 3) }
+        : first;
+    }
+
+Statement
+  = ExpressionStatement
+
+ExpressionStatement
+  = !(FunctionToken) expression:Expression _ EOS {
+      return {
+        type:       "ExpressionStatement",
+        expression: expression
+      };
+    }
+
+FunctionDeclaration
+  = FunctionToken _ id:Identifier _
+    "(" _ params:(FormalParameterList _)? ")" _ EOS _ body:FunctionBody _ EndToken _ EOS 
+    {
+      return {
+        type:   "FunctionDeclaration",
+        id:     id,
+        params: optionalList(extractOptional(params, 0)),
+        body:   body
+      };
+    }
+
+FunctionExpression
+  = FunctionToken _ id:(Identifier _)?
+    "(" _ params:(FormalParameterList _)? ")" _ EOS
+     _ body:FunctionBody _ EndToken _ EOS
+    {
+      return {
+        type:   "FunctionExpression",
+        id:     extractOptional(id, 0),
+        params: optionalList(extractOptional(params, 0)),
+        body:   body
+      };
+    }
+
+FormalParameterList
+  = first:Identifier rest:(_ "," _ Identifier)* {
+      return buildList(first, rest, 3);
+    }
+
+FunctionBody
+  = body:SourceElements? {
+      return {
+        type: "BlockStatement",
+        body: optionalList(body)
+      };
+    }
+
+Program
+  = body:SourceElements? {
+      return {
+        type: "Program",
+        body: optionalList(body)
+      };
+    }
+
+SourceElements
+  = first:SourceElement rest:(_ SourceElement)* {
+      return buildList(first, rest, 1);
+    }
+
+SourceElement
+  = Statement _ EOS
+    
+ThisToken
+  = "this"
+ 
+ReservedWord
+    = Keyword
+    
+Keyword = 
+    IfToken
+    / ForToken
+    / BreakToken
+    / WhileToken
+    / ContinueToken
+    / AndToken
+    / NotToken
+    / OrToken
+    / UndefinedToken
+    / ElseToken
+    / EndToken
+    / TrueToken
+    / FalseToken
+    / InToken
+
+BooleanLiteral
+  = TrueToken  { return { type: "Literal", value: true  }; }
+  / FalseToken { return { type: "Literal", value: false }; }
+  
+IfToken         = "if"          !IdentifierPart
+ForToken        = "for"         !IdentifierPart
+BreakToken      = "break"       !IdentifierPart
+WhileToken      = "while"       !IdentifierPart
+ContinueToken   = "continue"    !IdentifierPart
+AndToken        = "and"         !IdentifierPart
+NotToken        = "not"         !IdentifierPart
+OrToken         = "or"          !IdentifierPart
+UndefinedToken  = "undefined"   !IdentifierPart
+ElseToken       = "else"        !IdentifierPart
+EndToken        = "end"         !IdentifierPart
+TrueToken       = "true"        !IdentifierPart
+FalseToken      = "false"       !IdentifierPart
+FunctionToken   = "function"    !IdentifierPart
+InToken         = "in"    !IdentifierPart
+    
+Identifier
+  = !ReservedWord name:IdentifierName { return name; }
+
+IdentifierName "identifier"
+  = first:IdentifierStart rest:IdentifierPart* {
+      return {
+        type: "Identifier",
+        name: first + rest.join("")
+      };
+    }
+
+IdentifierStart
+  = [a-zA-Z]
+  / "_"
+
+IdentifierPart
+  = IdentifierStart
+  / [0-9]
+
+Literal
+  = Number / String
+  
+Number 
+  = Real 
+    / Integer
+
+Integer
+  = DecimalIntegerLiteral {
+      return { type: "Integer", value: parseInt(text(),10) };
+    }
+
+Real
+  = DecimalIntegerLiteral "." DecimalDigit* {
+      return { type: "Real", value: parseFloat(text()) };
+    }
+  / "." DecimalDigit+ {
+      return { type: "Real", value: parseFloat(text()) };
+    }
+
+DecimalIntegerLiteral
+  = "0"
+  / NonZeroDigit DecimalDigit*
+
+DecimalDigit
+  = [0-9]
+
+NonZeroDigit
+  = [1-9]
+ 
+
+String
+  = DblStr / SingleStr
+
+DblStr 
+  = '"' str:( [^"\n\r] / DblCharEscape )* '"'   { return { type: 'strlit', value: str.join( '' ) } }
+
+DblCharEscape 
+  = '""'  { return '"' }
+
+SingleStr 
+  = "'" str:([^'\n\r] / SingleCharEscape)* "'"   { return { type: 'strlit', value: str.join( '' ) } }
+
+SingleCharEscape 
+  = "''"  { return "'" }
+
+LineComment 
+  = "//" [^\n\r]*
+
+BlockComment_NL  
+  = "/*" (!("*/") AnyChar)* "*/"
+  
+BlockComment_NoNL  
+  = "/*" (!("*/" / EOL) AnyChar)* "*/"
+
+Whitespace 
+  = [ \t]
+
+MidWS
+  = ( Whitespace / BlockComment_NoNL )* 
+  
+/* whitespace that can appear between tokens */
+_  
+  = MidWS  LineContinuation?
+
+LineContinuation 
+  = ( '\\' MidWS LineComment EOL )
+  / ( '\\' (MidWS BlockComment_NoNL)* EOL)
+  / ( '\\' MidWS BlockComment_NL MidWS )
+  / ( '\\' MidWS EOL MidWS )
+
+EOLWS
+  = (EOL MidWS)
+
+EOL 
+  = "\n\r"
+    / "\n"
+    / "\r"
+   
+AnyChar 
+  = .
+
+EOF
+  = !AnyChar
+
+EOS 
+  = ( ';' EOLWS*)
+    / EOF 
+    / ( BlockComment_NL EOLWS*)
+    / ( MidWS LineComment EOLWS+)
+    / EOLWS+
