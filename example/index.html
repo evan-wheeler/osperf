@@ -1,25 +1,35 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
 <style>
-    * {
+    div.box, div.pre {
         font-family:"Courier New";
         font-size:11px;
     }
+
+    #editor { 
+        position: absolute;
+        left:10px;
+        top:10px;
+        width:500px;
+        height:500px;
+    }
     
-    textarea { 
+    #input { 
         position:absolute;
         padding:10px;
-        margin:0px;
-        white-space:nowrap;
+        margin:0px; 
+        white-space:pre;
+        overflow-y:scroll;
+        overflow-x:scroll;
     }
     
-    div {
+    div.box {
         margin:0px;
         padding:10px;
     }
     
-    pre {
+    pre.box {
         margin:0px;
         padding:10px;
     }
@@ -66,13 +76,26 @@
     }
 </style>
 <script src="//code.jquery.com/jquery-1.11.2.min.js"></script>
-<script src='profiler.js'></script>
 </head>
 <body>
-    <div id='lexerTime'></div>
-    <div id='parseTime'></div>
-    <textarea id='input' style=''></textarea>
-    <pre id='results' style=''></pre>
-    <div id='tokens' style=''></div>
+    <div class='box' id='lexerTime'></div>
+    <div class='box' id='parseTime'></div>
+
+    <div id="editor">function foo(items)
+            var x = "All this is syntax highlighted"
+            return x
+        end
+    </div>    
+    <!-- <textarea wrap='off' id='input' style=''></textarea> -->
+    <pre class='box' id='results' style=''></pre>
+    <div class='box' id='tokens' style=''></div>
+
+    <script src="src-noconflict/ace.js" type="text/javascript" charset="utf-8"></script>
+    <script>
+        var editor = ace.edit("editor");
+        editor.setTheme("ace/theme/monokai");
+        // editor.getSession().setMode("ace/mode/javascript");
+    </script> 
+   <script src='profiler.js'></script>
 </body>
 </html>

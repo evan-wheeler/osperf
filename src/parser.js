@@ -94,12 +94,18 @@ function make_parser( additionalTypes ) {
         skip_newlines();
     }
 
+    var token_error = function ( t, message ) {
+        t.type = "SyntaxError";
+        t.message = message;
+        throw t;
+    };    
+    
     var original_scope = {
         define: function (n, undeclared) {
             var v = n.value.toLowerCase();
             var t = this.def[v];
             if (typeof t === "object") {
-                // n.error(t.reserved ? "Already reserved." : "Already defined.");
+                // token_error( n,t.reserved ? "Already reserved." : "Already defined.");
                 if( !t.undeclared ) { 
                     console.log( "Warning: %s is already %s", n.value, t.reserved ? "reserved" : "defined" );
                 }
@@ -148,7 +154,7 @@ function make_parser( additionalTypes ) {
                     return;
                 }
                 if (t.arity === "name") {
-                    n.error("Already defined.");
+                    token_error(n, "Already defined.");
                 }
             }
             this.def[v] = n;
@@ -173,7 +179,7 @@ function make_parser( additionalTypes ) {
         var a, o, t, v;
         
         if (id && token.id !== id) {
-            token.error("Expected '" + id + "'.");
+            token_error( token, "Expected '" + id + "'.");
         }
         
         if (token_nr >= tokens.length) {
@@ -204,7 +210,7 @@ function make_parser( additionalTypes ) {
         else if (a === "operator") {
             o = symbol_table[vl];
             if (!o) {
-                t.error("Unknown operator.");
+                token_error( t, "Unknown operator.");
             }
         }
         else if (a === "string" || a ===  "number") {
@@ -215,7 +221,7 @@ function make_parser( additionalTypes ) {
             o = symbol_table[a];
         }
         else {
-            t.error("Unexpected token.");
+            token_error( t, "Unexpected token.");
         }
         
         // create an object from the type defined in the symbol table.
@@ -259,7 +265,6 @@ function make_parser( additionalTypes ) {
             // TODO: Add variable declarations here instead of as a type of statement... it will be a little more flexible.
             
             reverse();
-        
         }
         
         if (n.std) {
@@ -295,10 +300,10 @@ function make_parser( additionalTypes ) {
                 return this;
             }
 
-            this.error("Error parsing this statement.");
+            token_error( this, "Error parsing this statement.");
         },
         led: function (left) {
-            this.error("Missing operator.");
+            token_error( this,"Missing operator.");
         }
     };
 
@@ -355,7 +360,7 @@ function make_parser( additionalTypes ) {
     var assignment = function (id) {
         return infixr(id, 10, function (left) {
             if (left.id !== "." && left.id !== "[" && left.id !== '$' && left.id !== '$$' && left.arity !== "name" ) {
-                left.error("Bad lvalue.");
+                token_error( left,"Bad lvalue.");
             }
             this.first = left;
             this.second = expression(9);
@@ -410,6 +415,7 @@ function make_parser( additionalTypes ) {
     symbol( "end" );
     symbol("(end)");
     symbol("(name)");
+    symbol("...");
     symbol(":");
     symbol(";");
     symbol(")");
@@ -567,7 +573,7 @@ function make_parser( additionalTypes ) {
             if ((left.arity !== "unary" || left.id !== "function") &&
                     left.arity !== "name" && left.id !== "(" &&
                     left.id !== "&&" && left.id !== "||" && left.id !== "?" && left.id !== '$' && left.id !== '$$' ) {
-                left.error("Expected a variable name.");
+                token_error( left,"Expected a variable name.");
             }
         }
         if (token.id !== ")") {
@@ -613,7 +619,7 @@ function make_parser( additionalTypes ) {
             this.first = token;
         }
         else { 
-            token.error( "Expected label" );
+            token_error( token, "Expected label" );
         }
         this.arity = "unary";
         return this;
@@ -668,7 +674,7 @@ function make_parser( additionalTypes ) {
                     break;
                 }
                 else if ( token.arity !== "name") {
-                    token.error("Expected a parameter definition.");
+                    token_error( token,"Expected a parameter definition.");
                 }
                 
                 var varName, varType, t; 
@@ -739,7 +745,7 @@ function make_parser( additionalTypes ) {
             while (true) {
                 n = token;
                 if (n.arity !== "name") {
-                    n.error("Expected a new variable name.");
+                    token_error( n,"Expected a new variable name.");
                 }
                 scope.define(n);
                 advance();
@@ -838,7 +844,7 @@ function make_parser( additionalTypes ) {
         eos();
         
         if ( token.id !== "end" && token.id !== 'elseif' && token.id !== 'else' && token.id !== '(end)' ) {
-            token.error("Unreachable statement.");
+            token_error( token, "Unreachable statement.");
         }
         this.arity = "statement";
         return this;
@@ -848,7 +854,7 @@ function make_parser( additionalTypes ) {
         eos();
         
         if ( token.id !== "end" && token.id !== '(end)' ) {
-            token.error("Unreachable statement.");
+            token_error( token,"Unreachable statement.");
         }
         this.arity = "statement";
         return this;
@@ -866,7 +872,7 @@ function make_parser( additionalTypes ) {
         eos();
         
         if ( token.id !== "end" && token.id !== '(end)' ) {
-            token.error("Unreachable statement.");
+            token_error( token,"Unreachable statement.");
         }
 
         this.arity = "statement";
@@ -959,11 +965,11 @@ function make_parser( additionalTypes ) {
                 this.arity = "for_in";
             }
             else {
-                token.error( "Unexpected token.  Expected 'in' or '='." );
+                token_error( token, "Unexpected token.  Expected 'in' or '='." );
             }
         }
         else { 
-            token.error( "Unexpected token. Expected '(' or a variable name." );
+            token_error( token, "Unexpected token. Expected '(' or a variable name." );
         }
         
         advance( "end" );

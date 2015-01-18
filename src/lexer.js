@@ -12,8 +12,7 @@ var LINE_COMMENT = 1,
     VARIABLE = 5,
     NUMBER_NO_DECIMAL = 6,
     NUMBER_DECIMAL = 7,
-    CONTINUATION = 8,
-    ELLIPSIS = 9;
+    ELLIPSIS = 8;
 
 function makeToken( t, v, line, from, to ) { 
     return { type: t, value: v, line: line, from: from, to: to };
