@@ -44,7 +44,7 @@ function go(source) {
         tree = parser.parse( source );
         endTime = performance.now();
 
-        msg = JSON.stringify( tree, [ 'arity', 'value', 'left', 'right', 'third', 'first', 'second', 'third', 'id', 'declaration', "dataType", "returnType", "name" ], 4 );
+        msg = JSON.stringify( tree, [ 'arity', 'value', 'left', 'right', 'first', 'second', 'third', 'fourth', 'direction', 'label', 'id', 'declaration', "dataType", "returnType", "name" ], 4 );
     } catch (e) {
         endTime = performance.now();
         msg = JSON.stringify( e );
@@ -439,7 +439,7 @@ function make_parser( additionalTypes ) {
 
     var builtinTypes = union( [ 
                         "Assoc", 
-                        "Bytes", 
+                        "Bytes", "Boolean",
                         "CapiConnect", "CacheTree",
                         "Date", "Dynamic", "DAPINode", "DAPISession", "DAPIVersion", "DAPIStream", "DOMAttr",  "DOMCDATASection",  "DOMCharacterData",  "DOMComment", 
                             "DOMDocument",  "DOMDocumentFragment",  "DOMDocumentType", 
@@ -578,8 +578,12 @@ function make_parser( additionalTypes ) {
         
         if (a === "name") {
             if( indexOf( builtinTypes, vl ) !== -1 ) { 
-                o = symbol_table[vl];
-                a = "name";
+                o = scope.find(vl);
+                
+                if( o === symbol_table["(name)"] ) { 
+                    o = symbol_table[vl];
+                    a = "name";
+                }
             }
             else { 
                 o = scope.find(vl);
@@ -628,12 +632,30 @@ function make_parser( additionalTypes ) {
 
     var statement = function () {
         var n = token, v;
-
+        
+        // try to match labels...
+        if( n.arity === 'name' ) { 
+            advance();
+            
+            if( token.id === ':' ) { 
+                advance( ":" );
+                scope.define( n );
+                n.label = true;
+                skip_newlines();
+                return n;
+            }
+            // TODO: Add variable declarations here instead of as a type of statement... it will be a little more flexible.
+            
+            reverse();
+        
+        }
+        
         if (n.std) {
             advance();
             return n.std();
         }
 
+        // try expression-statement
         v = expression(0);
         eos();
         
@@ -753,15 +775,21 @@ function make_parser( additionalTypes ) {
         return s;
     };
     
-    var prefix_infix = function( id, bp, nudled ) {
+    var prefix_infix = function( id, bp, nud, led ) {
         var s = symbol( id, bp );
-        s.nud = nudled;
-        s.led = nudled;
+        s.nud = nud;
+        s.led = led || nud;
         return s;
     };
-
+        
     var stmt = function (s, f) {
         var x = symbol(s);
+        x.nud = function () {
+            scope.reserve(this);
+            this.first = expression(70);
+            this.arity = "unary";
+            return this;
+        };
         x.std = f;
         return x;
     };
@@ -812,12 +840,13 @@ function make_parser( additionalTypes ) {
     infixr("|", 15);
     infixr("^", 15);
 
+
     infixr("and", 30);
     infixr("or", 30);
     infixr("&&", 30);
     infixr("||", 30);
     infixr("^^", 30);
-
+    
     infixr("==", 40);
     infixr("!=", 40);
     infixr("<>", 40);
@@ -826,6 +855,8 @@ function make_parser( additionalTypes ) {
     infixr(">", 40);
     infixr(">=", 40);
 
+    infix( "in", 50 );
+    
     infix("+", 50);
     infix("-", 50);
 
@@ -850,12 +881,63 @@ function make_parser( additionalTypes ) {
         return this;
     } );
 
-    infix("[", 80, function (left) {
-        this.first = left;
-        this.second = expression(0);
-        this.arity = "binary";
-        advance("]");
-        return this;
+    prefix_infix( "[", 80, function () {
+            var name = "";
+            
+            while( token.id === '.' || token.arity === 'name' ) { 
+                name += token.value;
+                advance();
+            }
+                  
+            advance("]");
+            
+            this.first = name;
+            this.id = "xlate";
+            this.arity = "unary";
+            return this;
+        }, 
+        function (left) {
+            var range;
+            this.first = left;
+
+            if( token.id === ':' ) { 
+                range = token;
+                range.id = ":";
+                range.arity = "binary";
+                
+                advance( ":" );
+
+                this.second = range;
+                
+                if( token.id !== "]" ) { 
+                    range.second = expression( 0 );
+                }
+            }
+            else {
+                var e = expression(0);
+                
+                if( token.id === ":" ) { 
+                    range = token;
+                    range.id = ":";
+                    range.arity = "binary";
+                    
+                    advance( ":" );
+                    
+                    range.first = e;
+                    this.second = range;
+                    
+                    if( token.id !== "]" ) { 
+                        range.second = expression( 0 );
+                    }
+                }
+                else {
+                    this.second = e;
+                }
+            }
+
+            this.arity = "binary";
+            advance("]");
+            return this;
     });
 
     infix("(", 80, function (left) {
@@ -888,20 +970,50 @@ function make_parser( additionalTypes ) {
         advance(")");
         return this;
     });
-
+    
     prefixist("$$");
     prefixist("$");
 
     prefix("!");
     prefix("-");
 
+    // List literals
+
+    prefix("{", function () {
+        var a = [];
+        if (token.id !== "}") {
+            while (true) {
+                a.push(expression(0));
+                if (token.id !== ",") {
+                    break;
+                }
+                advance(",");
+            }
+        }
+        advance("}");
+        this.first = a;
+        this.arity = "unary";
+        return this;
+    });
+
+    stmt( "goto", function() { 
+        if( token.arity === "name" ) { 
+            this.first = token;
+        }
+        else { 
+            token.error( "Expected label" );
+        }
+        this.arity = "unary";
+        return this;
+    } );
+    
     prefix("(", function () {
         var e = expression(0);
         advance(")");
         return e;
     });
 
-    prefix("function", function () {
+    stmt( "function", function () {
         var a = [];
         var tmpRtnType, nameToken;
         
@@ -992,25 +1104,8 @@ function make_parser( additionalTypes ) {
         advance("end");
         this.arity = "function";
         scope.pop();
-        return this;
-    });
-
-    // List literals
-
-    prefix("{", function () {
-        var a = [];
-        if (token.id !== "}") {
-            while (true) {
-                a.push(expression(0));
-                if (token.id !== ",") {
-                    break;
-                }
-                advance(",");
-            }
-        }
-        advance("}");
-        this.first = a;
-        this.arity = "unary";
+        eos();
+        
         return this;
     });
 
@@ -1130,7 +1225,7 @@ function make_parser( additionalTypes ) {
         } 
         eos();
         
-        if ( token.id !== "end" && token.id !== '(end)' ) {
+        if ( token.id !== "end" && token.id !== 'elseif' && token.id !== 'else' && token.id !== '(end)' ) {
             token.error("Unreachable statement.");
         }
         this.arity = "statement";
@@ -1199,7 +1294,70 @@ function make_parser( additionalTypes ) {
         
         this.arity = "statement";
         return this;
-    });    
+    });
+    
+    stmt( "for", function() { 
+        var lookBodyName = "third";
+        
+        if( token.id === '(' ) { 
+            advance( '(' );
+
+            // c-style for loop.
+            this.first = ( token.id !== '(nl)' ) ? expression(0) : null;
+            advance( '(nl)' );
+
+            this.second = ( token.id !== '(nl)' ) ? expression(0) : null;
+            advance( '(nl)' );
+
+            this.third = ( token.id !== ')' ) ? expression(0) : null;
+            advance( ')' );
+            eos();
+
+            this.fourth = statements();
+
+            this.arity = "for-cstyle";
+        }
+        else if( token.arity === "name" ) { 
+            // for "x in" or for "x = 1 ..."            
+            
+            this.first = token;
+            advance();
+            
+            if( token.id === "=" ) { 
+                advance( '=' );
+                this.second = expression(0);
+                
+                if( token.id === 'to' || token.id === 'downto' ) {
+                    this.direction = token;
+                    advance();
+                }
+                
+                this.third = expression(0);
+                eos();
+                
+                this.fourth = statements();                
+                this.arity = "for";
+            }
+            else if( token.id === "in" ) { 
+                reverse();
+                this.first = expression( 0 );
+                eos();
+                
+                this.second = statements();
+                this.arity = "for_in";
+            }
+            else {
+                token.error( "Unexpected token.  Expected 'in' or '='." );
+            }
+        }
+        else { 
+            token.error( "Unexpected token. Expected '(' or a variable name." );
+        }
+        
+        advance( "end" );
+        eos();
+        return this;
+    } );
 
     stmt("switch", function() {
         this.first = expression(0);
