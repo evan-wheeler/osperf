@@ -11,8 +11,10 @@
         position: absolute;
         left:10px;
         top:10px;
-        width:500px;
+        width:800px;
         height:500px;
+        box-sizing:border-box;
+        border:1px solid #a0a0a0;
     }
     
     #input { 
@@ -34,18 +36,10 @@
         padding:10px;
     }
     
-    #input { 
-        left:10px;
-        top:10px;
-        width:500px;
-        height:500px;
-        box-sizing:border-box;
-    }
-    
     #results { 
         position:absolute;
-        border:1px solid black;
-        left:520px;
+        border:1px solid #a0a0a0;
+        left:820px;
         top:10px;
         width:500px;
         height:500px;
@@ -55,24 +49,102 @@
     
     #tokens { 
         overflow-y:scroll;
-        border:1px solid black;
+        border:1px solid #a0a0a0;
         position:absolute;
         left:10px;
         top:520px;
-        width:1010px;
+        width:1310px;
         height:200px;    
         box-sizing:border-box;
     }
     
+    #wrapNLBox {
+        position:absolute;
+        left:10px;
+        top:720px;
+        width:200px;
+        height:20px;
+    }
+    #wrapNLBox * {
+        vertical-align:top;        
+    }
+    
+    #tokenList {
+        padding:0;
+        margin:0;
+    }
+    
+    #tokenList > li {
+        list-style-type:none;    
+        box-sizing:border-box;
+        border:1px solid #e0e0e0;
+        border-radius:5px;
+        margin:2px;
+        padding:2px;
+        height:auto;
+        line-height:16px;
+        display:inline-block;
+        vertical-align:top;
+        font-family:"Courier New";
+        cursor:pointer;
+    }
+    
+    #tokenList > li.break { 
+        display:block;
+    }
+
+    #tokenList > li.operator {
+        color:darkred;
+        background-color:rgb(253, 242, 237);
+        border-color:rgb(207, 165, 151);
+        font-weight:bold;
+    }
+
+    #tokenList > li.name {
+        background-color:rgb(247, 251, 255);
+        border-color:rgb(135, 185, 202);
+    }
+
+    #tokenList > li.string {
+        background-color:rgb(243, 255, 226);
+        border-color:rgb(164, 186, 134);
+        color:darkgreen;
+    }
+    
+    #tokenList > li.nl {
+        background-color:white;
+        border-color:rgb(255, 233, 233);
+        color:red;
+    }
+    
+    #tokenList > li.number {
+        background-color:rgb(255, 232, 140);
+        border-color:rgb(192, 166, 61);
+    }
+
+    #tokenList > li.eof {
+        background-color:lightyellow;
+    }
+    
+    div.token {
+        
+    }
+    
     #lexerTime { 
         position:absolute;
-        left:1020px;
+        left:1320px;
         top:10px;
     }
     #parseTime { 
         position:absolute;
-        left:1020px;
+        left:1320px;
         top:26px;
+    }
+    #instrument {
+        position:absolute;
+        left:1325px;
+        top:50px;
+        width:auto;height:auto;
     }
 </style>
 <script src="//code.jquery.com/jquery-1.11.2.min.js"></script>
@@ -81,20 +153,18 @@
     <div class='box' id='lexerTime'></div>
     <div class='box' id='parseTime'></div>
 
-    <div id="editor">function foo(items)
-            var x = "All this is syntax highlighted"
-            return x
-        end
-    </div>    
+    <div id="editor">function String foo( String arg1=&apos;23&apos; )&#13;&#09;String x = "This is editable"&#13;&#09;return x&#13;end</div>    
     <!-- <textarea wrap='off' id='input' style=''></textarea> -->
     <pre class='box' id='results' style=''></pre>
-    <div class='box' id='tokens' style=''></div>
-
+    <div class='box' id='tokens' style=''><ul id='tokenList'></ul></div>
+    <div class='box' id='wrapNLBox'><input type='checkbox' id='wrapNL' checked><span> Wrap Newlines</span></div>
+    <button id='instrument'>Instrument</button>
+    
     <script src="src-noconflict/ace.js" type="text/javascript" charset="utf-8"></script>
     <script>
         var editor = ace.edit("editor");
-        editor.setTheme("ace/theme/monokai");
-        // editor.getSession().setMode("ace/mode/javascript");
+        editor.setTheme("ace/theme/chrome");
+        editor.getSession().setMode("ace/mode/oscript");
     </script> 
    <script src='profiler.js'></script>
 </body>

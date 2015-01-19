@@ -68,11 +68,15 @@ function make_parser( additionalTypes ) {
                         "Pattern",  "PatFind",  "PatChange",
                         "Real", "RegEx", "Record", "RecArray",
                         "String",
-                        "UAPISESSION",  "UAPIUSER",
+                        "UAPISESSION",  "UAPIUSER", "ULong",
                         "WAPISESSION",  "WAPIMAP","WAPIMAPTASK","WAPIWORK","WAPISUBWORK",  
                         "SAXParser",  "XSLProcessor" 
                         ], additionalTypes || [] ).map( function( f ) { return f.toLowerCase(); } );
     
+    var reservedWords = [ "and", "or", "not", "eq", "lt", "gt",
+                            "if", "elseif", "for", "switch", "repeat", "while", "end", "function", 
+                            "in", "to", "downto", "default", "case", "return", "break", "breakif", "continueif", "continue" ];
+
     var scope;
     var symbol_table = {};
     var token;
@@ -101,15 +105,19 @@ function make_parser( additionalTypes ) {
     };    
     
     var original_scope = {
-        define: function (n, undeclared) {
+        define: function ( n ) {
             var v = n.value.toLowerCase();
             var t = this.def[v];
-            if (typeof t === "object") {
-                // token_error( n,t.reserved ? "Already reserved." : "Already defined.");
-                if( !t.undeclared ) { 
-                    console.log( "Warning: %s is already %s", n.value, t.reserved ? "reserved" : "defined" );
-                }
+            
+            /*if (typeof t === "object" && t.reserved ) {
+                // token_error( n, n.value + " not expected here. The id is already defined" );                
             }
+            */
+            
+            if( indexOf( reservedWords, v ) > -1 ) {
+                token_error( n, n.value + ' not expected here.' );
+            }
+            
             this.def[v] = n;
             n.reserved = false;
             n.nud      = itself;
@@ -118,12 +126,9 @@ function make_parser( additionalTypes ) {
             n.lbp      = 0;
             n.scope    = scope;
             
-            if( undeclared ) { 
-                // just for warnings.
-                n.undeclared = true; 
-            } 
             return n;
         },
+        
         find: function (n) {
             // n is already lowercase...
             
@@ -140,14 +145,17 @@ function make_parser( additionalTypes ) {
                 }
             }
         },
+        
         pop: function () {
             scope = this.parent;
         },
+        
         reserve: function (n) {
             if (n.arity !== "name" || n.reserved) {
                 return;
-            }
+            }            
             var v = n.value.toLowerCase();
+            
             var t = this.def[v];
             if (t) {
                 if (t.reserved) {
@@ -229,18 +237,27 @@ function make_parser( additionalTypes ) {
         token.line  = t.line;
         token.from  = t.from;
         token.to    = t.to;
+        token.colFrom = t.colFrom;
+        token.colTo = t.colTo;
         token.value = v;
         token.arity = a;
-        
+                
         return token;
     }
 
     var expression = function (rbp) {
         var left;
         var t = token;
+        
+        // We shouldn't find statement reserved words here...
+        if( t.std && t.reservedWord ) {
+            // This statement token shouldn't be here.
+            token_error( t, t.value + " not expected here." );
+        }
+        
         advance();
         left = t.nud();
-        while (rbp < token.lbp) {
+        while (rbp < token.lbp ) {
             t = token;
             advance();
             left = t.led(left);
@@ -480,6 +497,7 @@ function make_parser( additionalTypes ) {
 
     infix("*", 60);
     infix("/", 60);
+    infix("%", 60);
 
     prefix_infix( ".", 80, function (left) {
         // infix version.
@@ -592,6 +610,13 @@ function make_parser( additionalTypes ) {
     prefixist("$$");
     prefixist("$");
 
+    prefix("not", function () {
+            this.first = expression(70);
+            this.arity = "unary";
+            this.id = "!";
+            return this;
+    } );
+    
     prefix("!");
     prefix("-");
 
@@ -717,9 +742,18 @@ function make_parser( additionalTypes ) {
         }
         this.first = a;
         advance(")");
+
+        // keep a reference to the first token (end of statement character)
+        this.start = token;
+
         eos();
+
         this.second = statements();
+
+        // keep a reference to the last token
+        this.end = token;
         advance("end");
+
         this.arity = "function";
         scope.pop();
         eos();
@@ -933,7 +967,7 @@ function make_parser( additionalTypes ) {
 
             this.fourth = statements();
 
-            this.arity = "for-cstyle";
+            this.id = "for_c";
         }
         else if( token.arity === "name" ) { 
             // for "x in" or for "x = 1 ..."            
@@ -954,7 +988,7 @@ function make_parser( additionalTypes ) {
                 eos();
                 
                 this.fourth = statements();                
-                this.arity = "for";
+                this.id = "for";
             }
             else if( token.id === "in" ) { 
                 reverse();
@@ -962,7 +996,7 @@ function make_parser( additionalTypes ) {
                 eos();
                 
                 this.second = statements();
-                this.arity = "for_in";
+                this.id = "for_in";
             }
             else {
                 token_error( token, "Unexpected token.  Expected 'in' or '='." );
@@ -974,6 +1008,7 @@ function make_parser( additionalTypes ) {
         
         advance( "end" );
         eos();
+        this.arity = "statement";
         return this;
     } );
 
@@ -1025,9 +1060,19 @@ function make_parser( additionalTypes ) {
         this.arity = "switch";
         return this;
     });
-    
+
+    reservedWords.forEach( function(r) { 
+        var t = symbol_table[r];
+        if( typeof t === "object" ) { 
+            t.reservedWord = true;
+        }
+    } );
     
     return { 
+        getTokens: function() { 
+            return tokens;
+        },
+        
         parse: function parse( source ) {   
     
             // reset state

@@ -1,26 +1,70 @@
 var Parser = require( '../src/parser' ),
-    Lexer = require( '../src/lexer' );
+    Lexer = require( '../src/lexer' ),
+    instrument = require( '../src/instrument' ),
+    _ = require( 'lodash' );
 
 function doLexer(src) { 
     'use strict';
     
     var lex = new Lexer();
-    lex.setInput( src );
-    var t;
-    var tokens = [];
+    var t, tokens;
     
     var beginTime = performance.now();
-    while( ( t = lex.get() ) !== null ) { 
-        tokens.push( t );
-    }    
-    var endTime = performance.now();
-    
-    var items = tokens.map( function( v ) { 
-        return JSON.stringify( v, [ "type", "value" ] );
-    } );
 
-    document.getElementById( "lexerTime" ).innerHTML = "Tokenize: " + ( endTime - beginTime ).toFixed( 2 ) + " ms";
-    document.getElementById( 'tokens' ).innerHTML = items.join( "<br>" );
+    for( var i = 0; i < 1; ++i ) { 
+        tokens = [];
+        lex.setInput( src );
+        while( ( t = lex.get() ) !== null ) { 
+            tokens.push( t );
+        }    
+    }
+    var endTime = performance.now();
+   
+    document.getElementById( "lexerTime" ).innerHTML = "Tokenize: " + ( ( endTime - beginTime ) / 1.0 ).toFixed( 2 ) + " ms";
+}
+
+function tokenText( t ) {
+    if( t.type === '(nl)' && !t.value !== ';' ) {
+        return "EOL";
+    }
+    
+    return t.value;
+}
+
+function tokenClass( t ) { 
+    if( t.type === '(nl)' ) { 
+        return "nl";
+    }
+    else if( t.type === "(end)" ) {
+        return "eof";
+    }
+    return t.type;
+}
+
+function displayLexResults( tokens ) {
+    var frag = document.createDocumentFragment();
+    
+    var wrapNL = $( '#wrapNL' ).prop( 'checked' );
+    
+    tokens.forEach( function( t ) { 
+        var li = document.createElement("li");
+        li.className = tokenClass( t );
+        li.textContent = tokenText( t );
+
+        $( li ).attr( { 
+            "d-row": "" + (t.line-1), // line is one based -- make zero based row.
+            "d-col-from": t.colFrom, 
+            "d-col-to": t.colTo + 1 // currently inclusive -- set to 1 passed.  
+        } );
+
+        frag.appendChild(li);
+        
+        if( wrapNL && t.type === '(nl)' && t.value !== ';' ) { 
+            frag.appendChild( document.createElement( 'br' ) );
+        }
+    } );
+    
+    $( '#tokens ul' ).html( frag );
 }
 
 function go(source) {
@@ -42,6 +86,8 @@ function go(source) {
         msg = JSON.stringify( e );
     }
     
+    displayLexResults( parser.getTokens() );    
+    
     document.getElementById( "parseTime" ).innerHTML = "Parse: " + ( endTime - beginTime ).toFixed( 2 ) + " ms";
     
     document.getElementById( 'results' ).innerHTML = msg
@@ -49,9 +95,53 @@ function go(source) {
             .replace(/[<]/g, '&lt;');
 }
 
+function doInstrument(editor) {
+    var parser = Parser(),
+        source = editor.getValue();
+    
+    try {
+        var tree = parser.parse( source );
+        var result = instrument( "Replicator.SynCoreMain.API.Transport.", source, tree );
+        editor.setValue( result );
+    } catch (e) {
+        window.alert( e.message );
+    }
+}
+
 $( function() { 
     var editor = ace.edit("editor");
-    editor.on( 'change', function() { 
+
+    $( '#tokenList' ).delegate( 'li', 'click', function() { 
+        // fix warnings.
+        editor.$blockScrolling = Infinity;
+        editor.setAnimatedScroll( true );
+
+        var $el = $( this );
+        
+        var row = parseInt( $el.attr( 'd-row' ),10 ),
+            fromCol = parseInt( $el.attr( 'd-col-from' ), 10 ), 
+            toCol = parseInt( $el.attr( 'd-col-to' ), 10 );
+        
+        var sel = editor.selection;
+        var newSel = { start: { row: row, column: fromCol }, end: { row: row, column: toCol } };
+        
+        editor.scrollToLine( row, false, true, function() {} );
+        sel.setSelectionRange( newSel );
+        editor.focus();
+    } );
+    
+    $( '#instrument' ).click( function() { 
+        doInstrument( editor );
+    } );
+    
+    $( '#wrapNL' ).click( function() { 
         go( editor.getValue() );
     } );
+    
+    var throttledOnChange = _.debounce( function() { 
+        var v = editor.getValue();
+        go( v );
+    }, 1000 );
+    
+    editor.on( 'change', throttledOnChange );
 } );

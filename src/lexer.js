@@ -14,30 +14,41 @@ var LINE_COMMENT = 1,
     NUMBER_DECIMAL = 7,
     ELLIPSIS = 8;
 
-function makeToken( t, v, line, from, to ) { 
-    return { type: t, value: v, line: line, from: from, to: to };
+function makeToken( t, v, line, from, to, colFrom, colTo ) { 
+    return { 
+        type: t, 
+        value: v, 
+        line: line, 
+        from: from, 
+        to: to, 
+        colFrom: colFrom, 
+        colTo: colTo 
+    };
 }
     
 Lexer.prototype = { 
     setInput: function( code ) {
-        this.code = code;
+        this.code = code.replace( /\r\n/g, '\n' ).replace( /\r/g, '\n' );
         this.line = 1;
         this.pos = 0;
-        this.line_pos = 0;
+        this.linePos = 0;
         this.done = ( this.code.length === 0 );
         this.curToken = null;
-        this.buffer = [];
+        this.indent = "";
     },
     
     readNextToken: function() { 
-    
-        var result = null, token = "", state = 0, eof = false, eat = false;
-        var continuation = false;
-        var nlInComment = false;
-        var ch = this.code.charAt( this.pos );
-        var ch1 = this.code.charAt( this.pos + 1 );
-        var from = this.pos;
-        var addCommentNewline = false;
+        var result = null,
+            token = "",
+            state = 0,
+            eof = false,
+            eat = false,
+            continuation = false,
+            nlInComment = false,
+            ch = this.code.charAt( this.pos ),
+            ch1 = this.code.charAt( this.pos + 1 ),
+            addCommentNewline = false,
+            from, colFrom, tmpLine = 0;
         
         if( ch1 === "" ) { 
             eof = true;
@@ -53,10 +64,11 @@ Lexer.prototype = {
             switch( state ) { 
             case 0:
                 from = this.pos;
+                colFrom = this.linePos;
 
                 // start state 
-                if( ch === ';' ) { 
-                    result = makeToken( "(nl)", ch, this.line, from, this.pos );
+                if( ch === ';' ) {
+                    result = makeToken( "(nl)", ch, this.line, from, this.pos, colFrom, this.linePos );
                 }
                 else if( ch === '\n' ) {
                     if( continuation ) {
@@ -65,7 +77,7 @@ Lexer.prototype = {
                         token = "";
                     }
                     else {
-                        result = makeToken( "(nl)", ch, this.line, from, this.pos );
+                        result = makeToken( "(nl)", ch, this.line, from, this.pos, colFrom, this.linePos );
                     }
                 }                
                 else if( ch === '\\' ) { 
@@ -91,7 +103,7 @@ Lexer.prototype = {
                     token = ".";
                 }
                 else if( /[_A-Za-z]/.test( ch ) && !/[_A-Za-z0-9]/.test( ch1 ) )  { 
-                    result = makeToken( "name", ch, this.line, from, this.pos );
+                    result = makeToken( "name", ch, this.line, from, this.pos, colFrom, this.linePos );
                 }
                 else if( /[_A-Za-z]/.test( ch ) ) { 
                     state = VARIABLE;
@@ -106,36 +118,36 @@ Lexer.prototype = {
                     token = ch;
                 }
                 else if( /[0-9]/.test( ch ) && !/[0-9]/.test( ch1 ) ) { 
-                    result = makeToken( "number", ch, this.line, from, this.pos );
+                    result = makeToken( "number", ch, this.line, from, this.pos, colFrom, this.linePos );
                 }
                 else if( /[0-9]/.test( ch ) ) { 
                     state = NUMBER_NO_DECIMAL;
                     token = ch;
                 }
                 else if( ch === "$" && ch1 === "$" ) { 
-                    result = makeToken( "operator", "$$", this.line, from, this.pos );
+                    result = makeToken( "operator", "$$", this.line, from, this.pos, colFrom, this.linePos );
                     eat = true;
                 }
                 else if( ch === "$" ) { 
-                    result = makeToken( "operator", "$", this.line, from, this.pos );
+                    result = makeToken( "operator", "$", this.line, from, this.pos, colFrom, this.linePos );
                 }
-                else if( ( "+-<>=!".indexOf( ch ) != -1 && ch1 === "=" ) ||
+                else if( ( "+-%<>=!".indexOf( ch ) != -1 && ch1 === "=" ) ||
                    ( ch === "<" && ch1 === ">" ) || 
                    ( ch === "|" && ch1 === "|" ) ||
                    ( ch === "&" && ch1 === "&" ) ||
                    ( ch === "&" && ch1 === "&" ) ||
                    ( ch === "^" && ch1 === "^" ) ) {
-                    result = makeToken( "operator", ch + ch1, this.line, from, this.pos );
+                    result = makeToken( "operator", ch + ch1, this.line, from, this.pos, colFrom, this.linePos );
                     eat = true;
                 }
-                else if( "{}/*,.()[]?:<>!=+-^|&".indexOf( ch ) != -1 ) { 
-                    result = makeToken( "operator", ch, this.line, from, this.pos );
+                else if( "{}/%*,.()[]?:<>!=+-^|&".indexOf( ch ) != -1 ) { 
+                    result = makeToken( "operator", ch, this.line, from, this.pos, colFrom, this.linePos );
                 }
                 break;
             case 1: // LINE_COMMENT
                 if( ch1 === '\n' ) {
                     if( !continuation ) { 
-                        result = makeToken( '(nl)', "", this.line, from, this.pos );
+                        result = makeToken( '(nl)', "", this.line,from, this.pos, colFrom, this.linePos );
                     }
                     
                     // ignore comments.
@@ -158,13 +170,19 @@ Lexer.prototype = {
                     // However, if it only contains one newline and it was preceded by a continuation token,
                     // don't add the newline.
                     if( ( continuation === false && nlInComment ) || addCommentNewline ) {
-                        result = makeToken( '(nl)', "", this.line, this.pos, this.pos );                    
+                        result = makeToken( '(nl)', "", tmpLine || this.line, from, from, colFrom, colFrom );                    
                     }
                     
                     eat = true;
                 }
                 else { 
                     if( ch === '\n' ) {
+                        if( nlInComment === false ) {
+                            tmpLine = this.line;
+                            from = this.pos; 
+                            colFrom = this.linePos;
+                        }
+                        
                         // If this is >= second newline, and we're preceded by a continuation, add a newline.
                         addCommentNewline = continuation && nlInComment;
                         nlInComment = true;
@@ -178,7 +196,7 @@ Lexer.prototype = {
                     eat = true;
                 }
                 else if( ch === "'" ) { 
-                    result = makeToken( 'string', token, this.line, from, this.pos );
+                    result = makeToken( 'string', token, this.line, from, this.pos, colFrom, this.linePos );
                 }
                 else { 
                     token += ch;
@@ -190,7 +208,7 @@ Lexer.prototype = {
                     eat = true;
                 }
                 else if( ch === '"' ) { 
-                    result = makeToken( 'string', token, this.line, from, this.pos );
+                    result = makeToken( 'string', token, this.line, from, this.pos, colFrom, this.linePos );
                 }
                 else { 
                     token += ch;
@@ -200,19 +218,21 @@ Lexer.prototype = {
                 token += ch;
                 
                 if( !/[_A-Za-z0-9]/.test( ch1 ) ) { 
-                    result = makeToken( 'name', token, this.line, from, this.pos );
+                    result = makeToken( 'name', token, this.line, from, this.pos, colFrom, this.linePos );
                 }
                 break;
             case 6: // NUMBER_NO_DECIMAL
-                if( ch === '.' && /[0-9]/.test( ch1 ) ) { 
-                    token += '.';
-                    state = NUMBER_DECIMAL;
+                if( ch === '.'  ) { 
+                    if( /[0-9]/.test( ch1 ) ) {
+                        token += '.';
+                        state = NUMBER_DECIMAL;
+                    }
+                    else {
+                        result = makeToken( 'number', token, this.line, from, this.pos, colFrom, this.linePos );
+                    }
                 }
-                else if( ch === '.' ) { 
-                    result = makeToken( 'number', token, this.line, from, this.pos );
-                }
-                else if( !/[0-9]/.test( ch1 ) ) {
-                    result = makeToken( 'number', token + ch, this.line, from, this.pos );
+                else if( !/[.0-9]/.test( ch1 ) ) {
+                    result = makeToken( 'number', token + ch, this.line, from, this.pos, colFrom, this.linePos );
                 }
                 else {
                     token += ch;
@@ -220,7 +240,7 @@ Lexer.prototype = {
                 break;
             case 7: // NUMBER_DECIMAL 
                 if( !/[0-9]/.test( ch1 ) ) {
-                    result = makeToken( 'number', token + ch, this.line, from, this.pos );
+                    result = makeToken( 'number', token + ch, this.line, from, this.pos, colFrom, this.linePos );
                 }
                 else {
                     token += ch;
@@ -231,9 +251,9 @@ Lexer.prototype = {
                 
                 if( ch1 != '.' ) { 
                     if( token != '...' ) { 
-                        throw "invalid token " + token;
+                        token = "...";
                     }
-                    result = makeToken( 'operator', token, this.line, from, this.pos );
+                    result = makeToken( 'operator', token, this.line, from, this.pos, colFrom, this.linePos );
                 }
                 
                 break;
@@ -246,21 +266,21 @@ Lexer.prototype = {
                 break;
             }
             
-            this.line_pos++;
+            this.linePos++;
             
             // keep track of lines.
             if( ch === '\n' ) { 
                 this.line++; 
-                this.line_pos = 0; 
+                this.linePos = 0; 
             }
 
             if( eat ) { 
-                this.line_pos += 1;
+                this.linePos += 1;
                 
                 // consume the whole lookahead and keep track of lines.
                 if( ch1 === '\n' ) { 
                     this.line++; 
-                    this.line_pos = 0; 
+                    this.linePos = 0; 
                 }
                 
                 this.pos += 2;
