@@ -80,7 +80,7 @@ function go(source) {
         tree = parser.parse( source );
         endTime = performance.now();
 
-        msg = JSON.stringify( tree, [ 'arity', 'value', 'left', 'right', 'first', 'second', 'third', 'fourth', 'direction', 'label', 'id', 'declaration', "dataType", "returnType", "name" ], 4 );
+        msg = JSON.stringify( tree, [ 'arity', 'value', 'left', 'right', 'first', 'second', 'third', 'fourth', 'direction', 'label', 'id', 'declaration', "dataType", "returnType", "name" ], 3 );
     } catch (e) {
         endTime = performance.now();
         msg = JSON.stringify( e );
@@ -101,7 +101,7 @@ function doInstrument(editor) {
     
     try {
         var tree = parser.parse( source );
-        var result = instrument( "Replicator.SynCoreMain.API.Transport.", source, tree );
+        var result = instrument( "path.", source, tree );
         editor.setValue( result );
     } catch (e) {
         window.alert( e.message );
@@ -110,6 +110,11 @@ function doInstrument(editor) {
 
 $( function() { 
     var editor = ace.edit("editor");
+
+    function doParse() { 
+        var v = editor.getValue();
+        go( v );
+    }
 
     $( '#tokenList' ).delegate( 'li', 'click', function() { 
         // fix warnings.
@@ -134,14 +139,10 @@ $( function() {
         doInstrument( editor );
     } );
     
-    $( '#wrapNL' ).click( function() { 
-        go( editor.getValue() );
-    } );
+    $( '#wrapNL' ).click( doParse );
     
-    var throttledOnChange = _.debounce( function() { 
-        var v = editor.getValue();
-        go( v );
-    }, 1000 );
+    var throttledParse = _.debounce( doParse, 1000 );
+    editor.on( 'change', throttledParse );
     
-    editor.on( 'change', throttledOnChange );
+    doParse();
 } );

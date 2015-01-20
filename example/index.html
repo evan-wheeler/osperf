@@ -8,27 +8,31 @@
     }
 
     #editor { 
-        position: absolute;
-        left:10px;
-        top:10px;
-        width:800px;
-        height:500px;
+        height:400px;
         box-sizing:border-box;
         border:1px solid #a0a0a0;
+        margin:2px;
     }
-    
-    #input { 
-        position:absolute;
-        padding:10px;
-        margin:0px; 
-        white-space:pre;
+
+    #tokens { 
         overflow-y:scroll;
-        overflow-x:scroll;
+        border:1px solid #a0a0a0;
+        margin:2px;
+        height:200px;    
+        box-sizing:border-box;
+    }
+
+    #results { 
+        border:1px solid #a0a0a0;
+        height:300px;    
+        box-sizing:border-box;
+        overflow-y:scroll;
+        margin:10px 2px 2px 2px;
     }
     
     div.box {
         margin:0px;
-        padding:10px;
+        padding:5px;
     }
     
     pre.box {
@@ -36,39 +40,16 @@
         padding:10px;
     }
     
-    #results { 
-        position:absolute;
-        border:1px solid #a0a0a0;
-        left:820px;
-        top:10px;
-        width:500px;
-        height:500px;
-        box-sizing:border-box;
-        overflow-y:scroll;
+    .wrapNLBox {
+        height:25px;
+        position:relative;
+        vertical-align:top;
     }
     
-    #tokens { 
-        overflow-y:scroll;
-        border:1px solid #a0a0a0;
-        position:absolute;
-        left:10px;
-        top:520px;
-        width:1310px;
-        height:200px;    
-        box-sizing:border-box;
+    .wrapNLBox > * {
+        vertical-align:top;
     }
-    
-    #wrapNLBox {
-        position:absolute;
-        left:10px;
-        top:720px;
-        width:200px;
-        height:20px;
-    }
-    #wrapNLBox * {
-        vertical-align:top;        
-    }
-    
+        
     #tokenList {
         padding:0;
         margin:0;
@@ -125,40 +106,46 @@
     #tokenList > li.eof {
         background-color:lightyellow;
     }
+
+    #instrument {
+    }
     
-    div.token {
-        
+    #time-box {
+        font-family:Arial;
+        font-size:11px;
+        position:absolute;
+        top:10px; left: 10px;
     }
     
     #lexerTime { 
-        position:absolute;
-        left:1320px;
-        top:10px;
     }
     #parseTime { 
-        position:absolute;
-        left:1320px;
-        top:26px;
     }
-    #instrument {
-        position:absolute;
-        left:1325px;
-        top:50px;
-        width:auto;height:auto;
+    
+    #main {
+        margin:0 auto;
+        max-width:920px;
+        box-sizing:border-box;
     }
+    
 </style>
 <script src="//code.jquery.com/jquery-1.11.2.min.js"></script>
 </head>
 <body>
-    <div class='box' id='lexerTime'></div>
-    <div class='box' id='parseTime'></div>
+    <div id='main'>
+        <div id="editor">function String foo( String arg1=&apos;23&apos; )&#13;&#09;String x = "This is editable"&#13;&#09;return x&#13;end</div>    
 
-    <div id="editor">function String foo( String arg1=&apos;23&apos; )&#13;&#09;String x = "This is editable"&#13;&#09;return x&#13;end</div>    
-    <!-- <textarea wrap='off' id='input' style=''></textarea> -->
-    <pre class='box' id='results' style=''></pre>
-    <div class='box' id='tokens' style=''><ul id='tokenList'></ul></div>
-    <div class='box' id='wrapNLBox'><input type='checkbox' id='wrapNL' checked><span> Wrap Newlines</span></div>
-    <button id='instrument'>Instrument</button>
+        <div class='box wrapNLBox'>
+            <span style='float:right'><input type='checkbox' id='wrapNL' checked> Wrap Newlines</span>
+            <button id='instrument'>Instrument</button>
+        </div>
+        <div class='box' id='tokens' style=''><ul id='tokenList'></ul></div>
+        <pre class='box' id='results' style=''></pre>
+    </div>
+    <div id='time-box'>
+        <div id='lexerTime'></div>
+        <div id='parseTime'></div>
+    </div>
     
     <script src="src-noconflict/ace.js" type="text/javascript" charset="utf-8"></script>
     <script>

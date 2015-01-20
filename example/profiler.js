@@ -81,7 +81,7 @@ function go(source) {
         tree = parser.parse( source );
         endTime = performance.now();
 
-        msg = JSON.stringify( tree, [ 'arity', 'value', 'left', 'right', 'first', 'second', 'third', 'fourth', 'direction', 'label', 'id', 'declaration', "dataType", "returnType", "name" ], 4 );
+        msg = JSON.stringify( tree, [ 'arity', 'value', 'left', 'right', 'first', 'second', 'third', 'fourth', 'direction', 'label', 'id', 'declaration', "dataType", "returnType", "name" ], 3 );
     } catch (e) {
         endTime = performance.now();
         msg = JSON.stringify( e );
@@ -102,7 +102,7 @@ function doInstrument(editor) {
     
     try {
         var tree = parser.parse( source );
-        var result = instrument( "Replicator.SynCoreMain.API.Transport.", source, tree );
+        var result = instrument( "path.", source, tree );
         editor.setValue( result );
     } catch (e) {
         window.alert( e.message );
@@ -111,6 +111,11 @@ function doInstrument(editor) {
 
 $( function() { 
     var editor = ace.edit("editor");
+
+    function doParse() { 
+        var v = editor.getValue();
+        go( v );
+    }
 
     $( '#tokenList' ).delegate( 'li', 'click', function() { 
         // fix warnings.
@@ -135,18 +140,14 @@ $( function() {
         doInstrument( editor );
     } );
     
-    $( '#wrapNL' ).click( function() { 
-        go( editor.getValue() );
-    } );
+    $( '#wrapNL' ).click( doParse );
     
-    var throttledOnChange = _.debounce( function() { 
-        var v = editor.getValue();
-        go( v );
-    }, 1000 );
+    var throttledParse = _.debounce( doParse, 1000 );
+    editor.on( 'change', throttledParse );
     
-    editor.on( 'change', throttledOnChange );
+    doParse();
 } );
-},{"../src/instrument":3,"../src/lexer":4,"../src/parser":5,"lodash":2}],2:[function(require,module,exports){
+},{"../src/instrument":4,"../src/lexer":5,"../src/parser":7,"lodash":2}],2:[function(require,module,exports){
 (function (global){
 /**
  * @license
@@ -6936,23 +6937,58 @@ $( function() {
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
 },{}],3:[function(require,module,exports){
-// instrument.js
-
-function compact(array) {
-    var index = -1,
-        length = array ? array.length : 0,
-        result = [];
-
-    while (++index < length) {
-        var value = array[index];
-        if (value) result.push(value);
-    }
-    return result;
+function DirectiveStack() { 
+    this._stack = [];
+    this._on = true;
 }
 
-var isArray = Array.isArray || function(arg) {
-    return Object.prototype.toString.call(arg) === '[object Array]';
+DirectiveStack.prototype = { 
+    push: function( val ) { 
+        if( !val ) { 
+            this._on = false;
+        }
+        this._stack.push( val );
+    },
+    
+    invert: function() { 
+        var i = this._stack.length - 1;
+        if( i < 0 ) {
+            throw "stack is empty";
+        }
+        this._stack[ len-1] = !this._stack[i];
+        this._on = _calcOn();
+    },
+    
+    pop: function() { 
+        this._stack.pop();
+        this._on = this._calcOn();
+    },
+    
+    empty: function() {
+        return this._stack.length === 0;
+    },
+    
+    on: function() { 
+        return this._on;
+    },
+    
+    _calcOn: function() {
+        var s = this._stack;
+        var i = s.length; 
+        while( i-- ) { 
+            if( !s[i] ) {
+                return false;
+            }            
+        }   
+        return true;
+    }
 };
+
+module.exports = DirectiveStack;
+},{}],4:[function(require,module,exports){
+// instrument.js
+
+var util = require( './util' );
   
 function applyEdits( code, edits ) { 
 
@@ -6980,15 +7016,65 @@ function add( funcID, pos, profileFunc ) {
 }
 
 function enterFn( funcID, node ) { 
-    return { insert_pos: node.to + 1, content: "\t$Pflr.I('" + funcID + "')\n" }; 
+    return { insert_pos: node.to + 1, content: "\tString __fid='" + funcID + "'; Dynamic __prf=$Pflr;__prf.I(__fid)\n" }; 
 }
 
-function exitFn( funcID, node ) {
-    return { insert_pos: node.from, content: "\t$Pflr.O('" + funcID + "')\n" }; 
+function exitFn( code, node ) {
+    var indent = findIndent( code, node.from );
+    return { insert_pos: node.from, content: "\t__prf.O(__fid)\n" }; 
+} 
+
+function returnFn( code, node ) {
+    var indentStr = findIndent( code, node.from );
+    
+    // if the return value is not a simple value, first store it in a temporary variable before returning...
+
+    if( isSimpleOp( node.first ) ) {
+        return { insert_pos: node.from, content: "__prf.O(__fid)\n" + indentStr };
+    }
+    
+    //                                     ++++++++++      +++++++++++              ++++++++++++++++++++++++++++++++++++++++++        
+    // convert: "return ( x() * y() )" to "Dynamic __return123131232 = ( x() * y() ); __prf.O(__fid); return __return123131232"
+    
+    var returnExprEnd = node.eos.from, 
+        returnBegin = node.from,
+        returnEnd = node.to,
+        rTmpID = "" + returnBegin,
+        tmpVar = "__return" + rTmpID;
+    
+    return [
+        { insert_pos: returnEnd+1, content: rTmpID + "=" },
+        { insert_pos: returnBegin, content: "Dynamic __" },
+        { insert_pos: returnExprEnd, content: [ "; __prf.O(__fid); return ", tmpVar, "\n", indentStr ].join( '' ) }
+    ];
 }
 
-function returnFn( funcID, node ) {
-    return { insert_pos: node.from, content: "$Pflr.O('" + funcID + "');" }; 
+function isSimpleOp( node ) { 
+    if ( !node || node.id === "(name)" || node.id === "(literal)" || node.arity === 'literal' ) { 
+        return true;
+    }
+    else if( node.id === "." ) { 
+        return ( !node.first || node.first.id === "(name)" || node.first.id === "(literal)" || node.first.arity === "literal" ) && 
+                ( node.second && ( node.second.id === "(name)" || node.second.id === "(literal)" || node.second.arity === "literal" ) );
+    }
+    return false;
+}
+
+function findIndent( code, pos ) { 
+    var indentStr = "";
+    while( --pos > 0 ) {
+        var ch = code[pos];
+        switch( ch ) { 
+            case '\t': case ' ':
+                indentStr = ch + indentStr;
+                break;
+            case '\n': case '\r':
+                return indentStr;
+            default: 
+                indentStr = "";
+        }
+    }
+    return indentStr;
 }
 
 function instrument( scriptPath, code, parseTree ) { 
@@ -6998,7 +7084,7 @@ function instrument( scriptPath, code, parseTree ) {
     
     // walk the top level looking for functions...
     var edits = [],
-        functions = isArray( parseTree ) ? parseTree : [ parseTree ];
+        functions = util.isArray( parseTree ) ? parseTree : [ parseTree ];
         
     functions.forEach( function( node ) { 
         if( node.id === "function" ) { 
@@ -7007,14 +7093,14 @@ function instrument( scriptPath, code, parseTree ) {
             // instrument the start and end of the function
             edits.push( enterFn( funcID, node.start ) );
             
-            var funcBody = isArray( node.second ) ? ( node.second || [] ) : [ node.second ];
+            var funcBody = util.isArray( node.second ) ? ( node.second || [] ) : [ node.second ];
             
             // instrument any returns in the body of the function.
-            edits = edits.concat( instrumentReturns( funcID, funcBody ) );
+            edits = edits.concat( instrumentReturns( code, funcBody ) );
             
             if( funcBody.length === 0 || ( funcBody[ funcBody.length - 1 ].id !== 'return' ) ) { 
                 // instrument the exit of the function
-                edits.push( exitFn( funcID, node.end ) );
+                edits.push( exitFn( code, node.end ) );
             }
         }
     } );
@@ -7022,24 +7108,24 @@ function instrument( scriptPath, code, parseTree ) {
     return applyEdits( code, edits );
 }
 
-function instrumentReturns( funcID, node ) {
+function instrumentReturns( code, node ) {
     var edits = [], children = [];
     
-    if( node.id === "return" ) { 
-        return returnFn( funcID, node );
+    if( node.id === "return" ) {                
+        return returnFn( code, node );
     }
     
-    children = isArray( node ) ? node : compact( [ node.first, node.second, node.third, node.fourth ] );
+    children = util.isArray( node ) ? node : util.compact( [ node.first, node.second, node.third, node.fourth ] );
     
     children.forEach( function( n ) { 
-        edits = edits.concat( instrumentReturns( funcID, n ) );
+        edits = edits.concat( instrumentReturns( code, n ) );
     } );
     
     return edits;
 } 
 
 module.exports = instrument;
-},{}],4:[function(require,module,exports){
+},{"./util":9}],5:[function(require,module,exports){
 function Lexer(){ 
     this.code = ""; 
     this.pos = 0;
@@ -7182,7 +7268,7 @@ Lexer.prototype = {
                     result = makeToken( "operator", ch + ch1, this.line, from, this.pos, colFrom, this.linePos );
                     eat = true;
                 }
-                else if( "{}/%*,.()[]?:<>!=+-^|&".indexOf( ch ) != -1 ) { 
+                else if( "#{}/%*,.()[]?:<>!=+-^|&".indexOf( ch ) != -1 ) { 
                     result = makeToken( "operator", ch, this.line, from, this.pos, colFrom, this.linePos );
                 }
                 break;
@@ -7324,7 +7410,7 @@ Lexer.prototype = {
                     this.line++; 
                     this.linePos = 0; 
                 }
-                
+                 
                 this.pos += 2;
                 ch = this.code.charAt( this.pos );
             }
@@ -7381,59 +7467,101 @@ Lexer.prototype = {
     }
 };
 
-},{}],5:[function(require,module,exports){
+},{}],6:[function(require,module,exports){
+var util = require( './util' );
+
+function identity(v) { return v; }
+function yes() { return true; } 
+
+function Macros( options ) {
+    options = options || {};
+    
+    this.valueFn = options.valueFn || identity;
+    this.canEvalItem = options.canEvalItem || yes;
+
+    this.defTable = {};
+}
+
+Macros.prototype = {
+    isDefined: function( name ) {
+        var n = this.valueFn( name );
+        return typeof this.defTable[n] !== 'undefined';
+    },
+    
+    undef: function( name ) {
+        var n = this.valueFn( name );
+        delete this.defTable[n];
+        return this;
+    },
+    
+    define: function( name, values ) {
+        var n = this.valueFn( name );
+        this.defTable[n] = values;
+        return this;
+    },
+    
+    evaluate: function( name ) { 
+        return this._eval( name, {} );
+    },
+    
+    _eval: function( name, visited ) {
+        var n = this.valueFn( name );
+
+        if( visited[n] ) { 
+            throw { 
+                message: "Recursive macro definition", 
+                name: name 
+            };
+        }        
+        visited[n] = true;
+        
+        var macroVals = this.defTable[n],
+            results = [];
+        
+        if( typeof macroVals !== 'undefined' ) { 
+
+            if( !util.isArray( macroVals ) ) {
+                macroVals = [ macroVals ];
+            }
+                    
+            var temp = macroVals.map( function( val, k ) {
+                return this.canEvalItem(val) && this.isDefined( val ) ?     
+                        this._eval( val, visited ) : val;
+                }, this );
+            
+            var i = -1, len = temp.length;
+            while( ++i < len ) { 
+                var a = temp[i];
+                if( !util.isArray( a ) ) { 
+                    results.push( a );
+                }
+                else {  
+                    results.push.apply( results, a );
+                }
+            }
+        }
+        
+        return results;
+    }
+};
+
+module.exports = Macros;
+},{"./util":9}],7:[function(require,module,exports){
 
 // parse.js
 // OScript parser based on Douglas Crockford's javascript parser.
 // From Top Down Operator Precedence
 
-var Lexer = require( './lexer' );
-
-function flatten(arr) { 
-    var numItems = arr.length, i = -1, rtn = [], rIndex = 0;
-    while( ++i < numItems ) {
-        var a = arr[i], j = -1, aLen = a.length;
-        while( ++j < aLen ) {
-            rtn[rIndex++] = a[j];
-        }
-    }
-    return rtn;
-}
-
-function indexOf( array, value, fromIndex ) {
-    var index = (fromIndex || 0) - 1,
-        length = array ? array.length : 0;
-
-    while (++index < length) {
-      if (array[index] === value) {
-        return index;
-      }
-    }
-    return -1;
-}
-
-function unique(arr) {
-    if( arr.unique ) {
-        return arr.unique();
-    }
-    var i = -1, result = [], arrLen = arr.length, v;
-    while( ++i < arrLen ) { 
-        v = arr[i];
-        if( indexOf( result, v ) < 0 ) {
-            result.push( v );
-        }
-    }
-    return result;
-}
-
-function union() { 
-    return unique( flatten( arguments ) );
-}
-
-function make_parser( additionalTypes ) {
+var Lexer = require( './lexer' ),
+    util = require( './util' ),
+    preprocessor = require( './preprocessor' );
+    
+function make_parser( options ) {
     "use strict";
+    
+    options = options || { unreachable_code_errors: false };
 
-    var builtinTypes = union( [ 
+    var builtinTypes = util.union( [ 
                         "Assoc", 
                         "Bytes", "Boolean",
                         "CapiConnect", "CacheTree",
@@ -7455,12 +7583,21 @@ function make_parser( additionalTypes ) {
                         "UAPISESSION",  "UAPIUSER", "ULong",
                         "WAPISESSION",  "WAPIMAP","WAPIMAPTASK","WAPIWORK","WAPISUBWORK",  
                         "SAXParser",  "XSLProcessor" 
-                        ], additionalTypes || [] ).map( function( f ) { return f.toLowerCase(); } );
+                        ], options.additionalTypes || [] ).map( function( f ) { return f.toLowerCase(); } );
     
     var reservedWords = [ "and", "or", "not", "eq", "lt", "gt",
                             "if", "elseif", "for", "switch", "repeat", "while", "end", "function", 
                             "in", "to", "downto", "default", "case", "return", "break", "breakif", "continueif", "continue" ];
-
+                            
+    var opAlternates = {
+        'eq': '=',
+        'lt': '<',
+        'gt': '>',
+        'or': '||',
+        'and': '&&',
+        'not': '!'
+    };
+                            
     var scope;
     var symbol_table = {};
     var token;
@@ -7498,7 +7635,7 @@ function make_parser( additionalTypes ) {
             }
             */
             
-            if( indexOf( reservedWords, v ) > -1 ) {
+            if( util.indexOf( reservedWords, v ) > -1 ) {
                 token_error( n, n.value + ' not expected here.' );
             }
             
@@ -7559,7 +7696,7 @@ function make_parser( additionalTypes ) {
         scope = Object.create(original_scope);
         scope.def = {};
         scope.parent = s;
-        return scope;
+        return scope; 
     }
     
     function reverse() { 
@@ -7586,8 +7723,16 @@ function make_parser( additionalTypes ) {
         a = t.type;
         var vl = v.toLowerCase();
         
+        var alt = opAlternates[vl];
+        
+        // check for operator alternates...
+        if( a === "name" && alt ) { 
+            a = 'operator';
+            vl = alt;
+        }
+        
         if (a === "name") {
-            if( indexOf( builtinTypes, vl ) !== -1 ) { 
+            if( util.indexOf( builtinTypes, vl ) !== -1 ) { 
                 o = scope.find(vl);
                 
                 if( o === symbol_table["(name)"] ) { 
@@ -8136,6 +8281,7 @@ function make_parser( additionalTypes ) {
 
         // keep a reference to the last token
         this.end = token;
+        
         advance("end");
 
         this.arity = "function";
@@ -8259,10 +8405,13 @@ function make_parser( additionalTypes ) {
         if( token.id !== "(nl)" ) {
             this.first = expression(0);
         } 
+        this.eos = token;
         eos();
         
         if ( token.id !== "end" && token.id !== 'elseif' && token.id !== 'else' && token.id !== '(end)' ) {
-            token_error( token, "Unreachable statement.");
+            if( options.unreachable_code_errors ) { 
+                token_error( token, "Unreachable statement.");
+            }
         }
         this.arity = "statement";
         return this;
@@ -8272,7 +8421,9 @@ function make_parser( additionalTypes ) {
         eos();
         
         if ( token.id !== "end" && token.id !== '(end)' ) {
-            token_error( token,"Unreachable statement.");
+            if( options.unreachable_code_errors ) { 
+                token_error( token,"Unreachable statement.");
+            }
         }
         this.arity = "statement";
         return this;
@@ -8280,6 +8431,7 @@ function make_parser( additionalTypes ) {
 
     stmt("breakif", function () {
         this.first = expression( 0 );
+        this.eos = token;
         eos();
         
         this.arity = "statement";
@@ -8299,6 +8451,7 @@ function make_parser( additionalTypes ) {
 
     stmt("continueif", function () {
         this.first = expression( 0 );
+        this.eos = token;
         eos();
         
         this.arity = "statement";
@@ -8308,6 +8461,7 @@ function make_parser( additionalTypes ) {
     stmt("while", function () {
         
         this.first = expression(0);
+        this.eos = token;
         eos();
         
         this.second = statements();
@@ -8474,9 +8628,24 @@ function make_parser( additionalTypes ) {
                 tokens.push( t );
             }
             
-            // add one ending newline.
-            tokens.push( { type: "(nl)", value: "" } );
+            // send through preprocessor...
+            tokens = preprocessor.run( tokens );
             
+            // if the program doesn't end with some kind of end-of-statement character, add one.
+            if( tokens.length > 0 ) { 
+                var lastToken = tokens[tokens.length-1];
+                if( lastToken.type !== '(nl)' ) { 
+                    tokens.push( { 
+                        type: '(nl)', 
+                        value:'', 
+                        from: lastToken.to+1, 
+                        to:lastToken.to+1, 
+                        line:lastToken.line, 
+                        colFrom: lastToken.colTo+1,
+                        colTo: lastToken.colTo+1 } );
+                }
+            }
+                        
             // init and parse.
             new_scope();
             advance();
@@ -8495,4 +8664,241 @@ function make_parser( additionalTypes ) {
 module.exports = make_parser;
 
 
-},{"./lexer":4}]},{},[1,3,4,5]);
+},{"./lexer":5,"./preprocessor":8,"./util":9}],8:[function(require,module,exports){
+// preproccessor.js
+var util = require( './util' ),
+    DirectiveStack = require( './directive_stack' ),
+    Macros = require( './macros' );
+    
+var token_error = function ( t, message ) {
+    t.type = "SyntaxError";
+    t.message = message || "Unknown or erroneous preproccessor directive";
+    throw t;
+};
+
+var macros,
+    directiveStack,
+    tokens = [],
+    token = null,
+    tokenIndex = 0,
+    findDirective = true,
+    results = [],
+    usingTokens = true;
+
+var advance = function( evalToken ) { 
+    if( token && evalToken && directiveStack.on() ) {
+        if( macros.isDefined( token ) ) { 
+            try {
+                results.push.apply( results, macros.evaluate( token ) );
+            }
+            catch( e ) { 
+                token_error( token, "Recursive macro definition can't be evaluated" );
+            }
+        }
+        else {
+            results.push( token );
+        }
+    }   
+    
+    if( tokenIndex >= tokens.length ) { 
+        token = null;
+        return;
+    }        
+    
+    token = tokens[tokenIndex++];
+};
+
+function isValidMacroName( tok ) { 
+    return tok && tok.type === 'name';
+}
+
+var directives = { 
+    "define": function(t,args) {
+        if( directiveStack.on() ) { 
+            if( isValidMacroName( args[0] ) ) { 
+                macros.define( args[0], args.slice( 1 ) );
+            }
+        }
+    },
+    "undef": function(t,args) { 
+        if( directiveStack.on() ) { 
+            macros.undef( args[0] );
+        }
+    },
+    "ifdef": function(t,args) { 
+        directiveStack.push( macros.isDefined( args[0] ) );
+    },
+    "ifndef": function(t, args ) { 
+        directiveStack.push( !macros.isDefined( args[0] ) );
+    },
+    "else": function(t,args) {             
+        if( directiveStack.empty() ) {
+            token_error(t);
+        }
+        directiveStack.invert();
+    },
+    "endif": function(t,args) { 
+        if( directiveStack.empty() ) {
+            token_error( t );
+        }
+        directiveStack.pop();
+    }
+};
+
+function directive() { 
+    if( token.type === 'name' ) { 
+        var t = token,
+            v = t.value.toLowerCase(),
+            dir = directives[ v ],
+            params = [];
+            
+        if( !dir ) {                
+            token_error( token );
+        }
+        
+        // collect all tokens until eol.
+        while( true ) { 
+            advance(false);
+            
+            if( !token ) {
+                break;
+            }
+            else if ( isNewline( token ) ) {
+                advance(false);
+                break;
+            }
+
+            params.push( token );
+        }
+        
+        // process the directive.
+        dir( t, params );
+    }
+    else token_error( token );
+}    
+
+function isNewline( t ) { 
+    return t && t.type === "(nl)" && t.value !== ';';
+}
+
+function preprocess(tokenList) { 
+    // reset our globals
+    directiveStack = new DirectiveStack();
+    
+    macros = new Macros( { 
+                    canEvalItem: isValidMacroName, 
+                    valueFn: function(t) { return t.value; } 
+                } );
+    
+    tokens = tokenList;
+    tokenIndex = 0;
+    token = null;
+    results = [];
+
+    // start by finding directives
+    var findDirective = true;
+
+    // load first token.
+    advance();
+
+    while( token ) { 
+        if( findDirective ) { 
+            // # - is a directive line.
+            // Real newlines are skipped.
+            // Any other token switches to normal processing...
+            
+            if( token.type === 'operator' && token.value === '#' ) { 
+                advance(false);
+                directive();
+            }
+            else if( isNewline( token ) ) { 
+                advance(true);
+            }
+            else { 
+                // process this token in the next loop.
+                findDirective = false;
+            }
+        }
+        else {
+            // normal code mode... newlines switch the state back to finding directives.
+            if( token.type === "(nl)" && token.value !== ';' ) {
+                findDirective = true;
+            }
+            advance(true);
+        }
+    }
+    
+    return results;
+}
+
+module.exports = { 
+    run: preprocess
+};
+
+},{"./directive_stack":3,"./macros":6,"./util":9}],9:[function(require,module,exports){
+function flatten(arr) { 
+    var numItems = arr.length, i = -1, rtn = [], rIndex = 0;
+    while( ++i < numItems ) {
+        var a = arr[i], j = -1, aLen = a.length;
+        while( ++j < aLen ) {
+            rtn[rIndex++] = a[j];
+        }
+    }
+    return rtn;
+}
+
+function indexOf( array, value, fromIndex ) {
+    var index = (fromIndex || 0) - 1,
+        length = array ? array.length : 0;
+
+    while (++index < length) {
+      if (array[index] === value) {
+        return index;
+      }
+    }
+    return -1;
+}
+
+function unique(arr) {
+    if( arr.unique ) {
+        return arr.unique();
+    }
+    var i = -1, result = [], arrLen = arr.length, v;
+    while( ++i < arrLen ) { 
+        v = arr[i];
+        if( indexOf( result, v ) < 0 ) {
+            result.push( v );
+        }
+    }
+    return result;
+}
+
+function union() { 
+    return unique( flatten( arguments ) );
+}
+
+function compact(array) {
+    var index = -1,
+        length = array ? array.length : 0,
+        result = [];
+
+    while (++index < length) {
+        var value = array[index];
+        if (value) result.push(value);
+    }
+    return result;
+}
+
+var isArray = Array.isArray || function(arg) {
+    return Object.prototype.toString.call(arg) === '[object Array]';
+};
+
+module.exports = { 
+    union: union,
+    unique: unique,
+    indexOf: indexOf,
+    flatten: flatten,
+    isArray: isArray,
+    compact: compact
+};
+},{}]},{},[1,3,4,5,6,7,8,9]);

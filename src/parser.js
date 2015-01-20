@@ -3,53 +3,16 @@
 // OScript parser based on Douglas Crockford's javascript parser.
 // From Top Down Operator Precedence
 
-var Lexer = require( './lexer' );
-
-function flatten(arr) { 
-    var numItems = arr.length, i = -1, rtn = [], rIndex = 0;
-    while( ++i < numItems ) {
-        var a = arr[i], j = -1, aLen = a.length;
-        while( ++j < aLen ) {
-            rtn[rIndex++] = a[j];
-        }
-    }
-    return rtn;
-}
-
-function indexOf( array, value, fromIndex ) {
-    var index = (fromIndex || 0) - 1,
-        length = array ? array.length : 0;
-
-    while (++index < length) {
-      if (array[index] === value) {
-        return index;
-      }
-    }
-    return -1;
-}
-
-function unique(arr) {
-    if( arr.unique ) {
-        return arr.unique();
-    }
-    var i = -1, result = [], arrLen = arr.length, v;
-    while( ++i < arrLen ) { 
-        v = arr[i];
-        if( indexOf( result, v ) < 0 ) {
-            result.push( v );
-        }
-    }
-    return result;
-}
-
-function union() { 
-    return unique( flatten( arguments ) );
-}
-
-function make_parser( additionalTypes ) {
+var Lexer = require( './lexer' ),
+    util = require( './util' ),
+    preprocessor = require( './preprocessor' );
+    
+function make_parser( options ) {
     "use strict";
+    
+    options = options || { unreachable_code_errors: false };
 
-    var builtinTypes = union( [ 
+    var builtinTypes = util.union( [ 
                         "Assoc", 
                         "Bytes", "Boolean",
                         "CapiConnect", "CacheTree",
@@ -71,12 +34,21 @@ function make_parser( additionalTypes ) {
                         "UAPISESSION",  "UAPIUSER", "ULong",
                         "WAPISESSION",  "WAPIMAP","WAPIMAPTASK","WAPIWORK","WAPISUBWORK",  
                         "SAXParser",  "XSLProcessor" 
-                        ], additionalTypes || [] ).map( function( f ) { return f.toLowerCase(); } );
+                        ], options.additionalTypes || [] ).map( function( f ) { return f.toLowerCase(); } );
     
     var reservedWords = [ "and", "or", "not", "eq", "lt", "gt",
                             "if", "elseif", "for", "switch", "repeat", "while", "end", "function", 
                             "in", "to", "downto", "default", "case", "return", "break", "breakif", "continueif", "continue" ];
-
+                            
+    var opAlternates = {
+        'eq': '=',
+        'lt': '<',
+        'gt': '>',
+        'or': '||',
+        'and': '&&',
+        'not': '!'
+    };
+                            
     var scope;
     var symbol_table = {};
     var token;
@@ -114,7 +86,7 @@ function make_parser( additionalTypes ) {
             }
             */
             
-            if( indexOf( reservedWords, v ) > -1 ) {
+            if( util.indexOf( reservedWords, v ) > -1 ) {
                 token_error( n, n.value + ' not expected here.' );
             }
             
@@ -175,7 +147,7 @@ function make_parser( additionalTypes ) {
         scope = Object.create(original_scope);
         scope.def = {};
         scope.parent = s;
-        return scope;
+        return scope; 
     }
     
     function reverse() { 
@@ -202,8 +174,16 @@ function make_parser( additionalTypes ) {
         a = t.type;
         var vl = v.toLowerCase();
         
+        var alt = opAlternates[vl];
+        
+        // check for operator alternates...
+        if( a === "name" && alt ) { 
+            a = 'operator';
+            vl = alt;
+        }
+        
         if (a === "name") {
-            if( indexOf( builtinTypes, vl ) !== -1 ) { 
+            if( util.indexOf( builtinTypes, vl ) !== -1 ) { 
                 o = scope.find(vl);
                 
                 if( o === symbol_table["(name)"] ) { 
@@ -752,6 +732,7 @@ function make_parser( additionalTypes ) {
 
         // keep a reference to the last token
         this.end = token;
+        
         advance("end");
 
         this.arity = "function";
@@ -875,10 +856,13 @@ function make_parser( additionalTypes ) {
         if( token.id !== "(nl)" ) {
             this.first = expression(0);
         } 
+        this.eos = token;
         eos();
         
         if ( token.id !== "end" && token.id !== 'elseif' && token.id !== 'else' && token.id !== '(end)' ) {
-            token_error( token, "Unreachable statement.");
+            if( options.unreachable_code_errors ) { 
+                token_error( token, "Unreachable statement.");
+            }
         }
         this.arity = "statement";
         return this;
@@ -888,7 +872,9 @@ function make_parser( additionalTypes ) {
         eos();
         
         if ( token.id !== "end" && token.id !== '(end)' ) {
-            token_error( token,"Unreachable statement.");
+            if( options.unreachable_code_errors ) { 
+                token_error( token,"Unreachable statement.");
+            }
         }
         this.arity = "statement";
         return this;
@@ -896,6 +882,7 @@ function make_parser( additionalTypes ) {
 
     stmt("breakif", function () {
         this.first = expression( 0 );
+        this.eos = token;
         eos();
         
         this.arity = "statement";
@@ -915,6 +902,7 @@ function make_parser( additionalTypes ) {
 
     stmt("continueif", function () {
         this.first = expression( 0 );
+        this.eos = token;
         eos();
         
         this.arity = "statement";
@@ -924,6 +912,7 @@ function make_parser( additionalTypes ) {
     stmt("while", function () {
         
         this.first = expression(0);
+        this.eos = token;
         eos();
         
         this.second = statements();
@@ -1090,9 +1079,24 @@ function make_parser( additionalTypes ) {
                 tokens.push( t );
             }
             
-            // add one ending newline.
-            tokens.push( { type: "(nl)", value: "" } );
+            // send through preprocessor...
+            tokens = preprocessor.run( tokens );
             
+            // if the program doesn't end with some kind of end-of-statement character, add one.
+            if( tokens.length > 0 ) { 
+                var lastToken = tokens[tokens.length-1];
+                if( lastToken.type !== '(nl)' ) { 
+                    tokens.push( { 
+                        type: '(nl)', 
+                        value:'', 
+                        from: lastToken.to+1, 
+                        to:lastToken.to+1, 
+                        line:lastToken.line, 
+                        colFrom: lastToken.colTo+1,
+                        colTo: lastToken.colTo+1 } );
+                }
+            }
+                        
             // init and parse.
             new_scope();
             advance();

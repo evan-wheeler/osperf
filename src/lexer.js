@@ -140,7 +140,7 @@ Lexer.prototype = {
                     result = makeToken( "operator", ch + ch1, this.line, from, this.pos, colFrom, this.linePos );
                     eat = true;
                 }
-                else if( "{}/%*,.()[]?:<>!=+-^|&".indexOf( ch ) != -1 ) { 
+                else if( "#{}/%*,.()[]?:<>!=+-^|&".indexOf( ch ) != -1 ) { 
                     result = makeToken( "operator", ch, this.line, from, this.pos, colFrom, this.linePos );
                 }
                 break;
@@ -282,7 +282,7 @@ Lexer.prototype = {
                     this.line++; 
                     this.linePos = 0; 
                 }
-                
+                 
                 this.pos += 2;
                 ch = this.code.charAt( this.pos );
             }
