@@ -7087,7 +7087,7 @@ function instrument( scriptPath, code, parseTree ) {
         functions = util.isArray( parseTree ) ? parseTree : [ parseTree ];
         
     functions.forEach( function( node ) { 
-        if( node.id === "function" ) { 
+        if( node && node.id === "function" ) { 
             var funcID = scriptPath + node.name;
             
             // instrument the start and end of the function
@@ -7098,7 +7098,13 @@ function instrument( scriptPath, code, parseTree ) {
             // instrument any returns in the body of the function.
             edits = edits.concat( instrumentReturns( code, funcBody ) );
             
-            if( funcBody.length === 0 || ( funcBody[ funcBody.length - 1 ].id !== 'return' ) ) { 
+            var lastStatement = null;
+
+            if( funcBody.length ) { 
+                lastStatement = ( funcBody[funcBody.length - 1] || {} ).id;
+            }
+            
+            if( lastStatement !== "return" ) { 
                 // instrument the exit of the function
                 edits.push( exitFn( code, node.end ) );
             }
@@ -7111,16 +7117,17 @@ function instrument( scriptPath, code, parseTree ) {
 function instrumentReturns( code, node ) {
     var edits = [], children = [];
     
-    if( node.id === "return" ) {                
-        return returnFn( code, node );
-    }
-    
-    children = util.isArray( node ) ? node : util.compact( [ node.first, node.second, node.third, node.fourth ] );
-    
-    children.forEach( function( n ) { 
-        edits = edits.concat( instrumentReturns( code, n ) );
-    } );
-    
+    if( node ) {
+        if( node.id === "return" ) {                
+            return returnFn( code, node );
+        }
+        
+        children = util.isArray( node ) ? node : util.compact( [ node.first, node.second, node.third, node.fourth ] );
+        
+        children.forEach( function( n ) { 
+            edits = edits.concat( instrumentReturns( code, n ) );
+        } );
+    }    
     return edits;
 } 
 
