@@ -12,12 +12,12 @@ DirectiveStack.prototype = {
     },
     
     invert: function() { 
-        var i = this._stack.length - 1;
+        var i =  this._stack.length - 1;
         if( i < 0 ) {
             throw "stack is empty";
         }
-        this._stack[ len-1] = !this._stack[i];
-        this._on = _calcOn();
+        this._stack[i] = !this._stack[i];
+        this._on = this._calcOn();
     },
     
     pop: function() { 
