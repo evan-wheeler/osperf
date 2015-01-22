@@ -12,7 +12,8 @@ var LINE_COMMENT = 1,
     VARIABLE = 5,
     NUMBER_NO_DECIMAL = 6,
     NUMBER_DECIMAL = 7,
-    ELLIPSIS = 8;
+    ELLIPSIS = 8,
+    OBJ_LITERAL = 9;
 
 function makeToken( t, v, line, from, to, colFrom, colTo ) { 
     return { 
@@ -123,6 +124,10 @@ Lexer.prototype = {
                 else if( /[0-9]/.test( ch ) ) { 
                     state = NUMBER_NO_DECIMAL;
                     token = ch;
+                }
+                else if( ch === '#' && /[0-9a-fA-F]/.test( ch1 ) ) { 
+                    state = OBJ_LITERAL;
+                    token = '#';
                 }
                 else if( ch === "$" && ch1 === "$" ) { 
                     result = makeToken( "operator", "$$", this.line, from, this.pos, colFrom, this.linePos );
@@ -256,6 +261,14 @@ Lexer.prototype = {
                         token = "...";
                     }
                     result = makeToken( 'operator', token, this.line, from, this.pos, colFrom, this.linePos );
+                }
+                
+                break;
+            case 9: // OBJ_LITERAL  -- #F1A981C3
+                token += ch;
+                
+                if( !/[0-9a-fA-F]/.test( ch1 ) ) { 
+                    result = makeToken( 'objref', token, this.line, from, this.pos, colFrom, this.linePos );
                 }
                 
                 break;
