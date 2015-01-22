@@ -15,7 +15,7 @@ function make_parser( options ) {
     var builtinTypes = util.union( [ 
                         "Assoc", 
                         "Bytes", "Boolean",
-                        "CapiConnect", "CacheTree", "CAPILOGIN",
+                        "CapiConnect", "CacheTree", "CAPILOGIN", "CAPILog", "CAPIErr",
                         "Date", "Dynamic", "DAPINode", "DAPISession", "DAPIVersion", "DAPIStream", "DOMAttr",  "DOMCDATASection",  "DOMCharacterData",  "DOMComment", 
                             "DOMDocument",  "DOMDocumentFragment",  "DOMDocumentType", 
                             "DOMElement",  "DOMEntity",  "DOMEntityReference",  "DOMImplementation", 
@@ -30,7 +30,7 @@ function make_parser( options ) {
                         "Object", "ObjRef",
                         "Pattern",  "PatFind",  "PatChange",
                         "Real", "RegEx", "Record", "RecArray",
-                        "String", "Script",
+                        "String", "Script", "Socket",
                         "UAPISESSION",  "UAPIUSER", "ULong",
                         "WAPISESSION",  "WAPIMAP","WAPIMAPTASK","WAPIWORK","WAPISUBWORK",  
                         "SAXParser",  "XSLProcessor" 
@@ -182,7 +182,8 @@ function make_parser( options ) {
             vl = alt;
         }
         
-        if (a === "name") {
+        switch( a ) { 
+        case "name":
             if( util.indexOf( builtinTypes, vl ) !== -1 ) { 
                 o = scope.find(vl);
                 
@@ -194,21 +195,21 @@ function make_parser( options ) {
             else { 
                 o = scope.find(vl);
             }
-        }
-        else if (a === "operator") {
+            break;
+        case "operator":
             o = symbol_table[vl];
             if (!o) {
                 token_error( t, "Unknown operator.");
             }
-        }
-        else if (a === "string" || a ===  "number") {
+            break;
+        case "string": case "number": case "objref":
             o = symbol_table["(literal)"];
             a = "literal";
-        } 
-        else if( a === "(nl)" ) {
+            break;
+        case "(nl)":
             o = symbol_table[a];
-        }
-        else {
+            break;
+        default:
             token_error( t, "Unexpected token.");
         }
         
@@ -254,13 +255,25 @@ function make_parser( options ) {
             
             if( token.id === ':' ) { 
                 advance( ":" );
-                scope.define( n );
+                scope.define( n );  // this also prevents reserved words from being labels.
                 n.label = true;
                 skip_newlines();
                 return n;
             }
-            // TODO: Add variable declarations here instead of as a type of statement... it will be a little more flexible.
             
+            if( util.indexOf( builtinTypes, n.value.toLowerCase() ) > -1 ) { 
+                // if the next character is a name, this is probably a declaration.
+                if( token.arity === "name" ) { 
+                    return declaration( n );
+                }
+                else if( token.id === '(nl)' ) { 
+                    // a variable type is allowed to be alone on a line --- essentially a noop.
+                    eos();
+                    return [];
+                }
+            }
+            
+            // reverse and parse as a statement or an expression.
             reverse();
         }
         
@@ -464,7 +477,6 @@ function make_parser( options ) {
     infixr("|", 15);
     infixr("^", 15);
 
-
     infixr("and", 30);
     infixr("or", 30);
     infixr("&&", 30);
@@ -611,7 +623,7 @@ function make_parser( options ) {
     
     prefix("!");
     prefix("-");
-
+    
     // List literals
 
     prefix("{", function () {
@@ -678,7 +690,8 @@ function make_parser( options ) {
             nameToken = tmpRtnType;
         }
         
-        scope.define( nameToken );
+        // Don't define the function name -- OScript allows defining functions with names of types.
+        // scope.define( nameToken );
         
         // arguments...
         advance("(");
@@ -754,53 +767,44 @@ function make_parser( options ) {
         return this;
     });
 
-    // declarations...
+    function declaration( varType ) { 
+        var a = [], n, t;
+        
+        while (true) {
+            n = token;
+            if (n.arity !== "name") {
+                token_error( n,"Expected a new variable name.");
+            }
+            scope.define(n);
+            advance();
+            if (token.id === "=") {
+                t = token;
+                advance("=");
+                t.first = n;
+                t.second = expression(0);
+                t.arity = "binary";
+            }
+            else {
+                t = n;
+            }
+            t.dataType = varType;
+            a.push( t );
+            
+            if (token.id !== ",") {
+                break;
+            }
+            advance(",");
+        }
+        
+        eos();
+        return a.length === 0 ? null : a.length === 1 ? a[0] : a;                
+    }
     
     builtinTypes.forEach( function( varType ) { 
-        stmt( varType, function () {
-            var a = [], n, t;
-            
-            if( token.id === "." ) { 
-                // this is not a declaration but a reference to a static member of a built-in type.
-                // step back a token and evaluate as an expression statement...
-                reverse();
-                a = expression(0);
-                eos();
-                return a;
-            }
-
-            while (true) {
-                n = token;
-                if (n.arity !== "name") {
-                    token_error( n,"Expected a new variable name.");
-                }
-                scope.define(n);
-                advance();
-                if (token.id === "=") {
-                    t = token;
-                    advance("=");
-                    t.first = n;
-                    t.second = expression(0);
-                    t.arity = "binary";
-                }
-                else {
-                    t = n;
-                    t.dataType = this;
-                }
-                a.push( t );
-                
-                if (token.id !== ",") {
-                    break;
-                }
-                advance(",");
-            }
-            
-            eos();
-            return a.length === 0 ? null : a.length === 1 ? a[0] : a;
-        });
+        symbol( varType );
     } );
-    
-    stmt("elseif", function() {
+
+    var ifElseIf = function() {
         this.first = expression(0);
         eos();
         
@@ -808,15 +812,13 @@ function make_parser( options ) {
         skip_newlines();
       
         if ( token.id === "elseif" ) {
-            scope.reserve(token);
             this.third = statement();
             
-            // final 'end' will be taken care of by elseif.
+            // final 'end' will be taken care of by original if.
             this.arity = "statement";
             return this;
         }
         else if (token.id === "else") {
-            scope.reserve(token);
             advance("else");
             eos();
             this.third = statements();
@@ -830,39 +832,10 @@ function make_parser( options ) {
         
         this.arity = "statement";
         return this;
-    });
-
-    stmt("if", function() {
-        this.first = expression(0);
-        eos();
-        
-        this.second = statements();
-        skip_newlines();
-      
-        if ( token.id === "elseif" ) {
-            scope.reserve(token);
-            this.third = statement();
-
-            // final 'end' will be taken care of by elseif.
-            this.arity = "statement";
-            return this;
-        }
-        else if (token.id === "else") {
-            scope.reserve(token);
-            advance("else");
-            eos();
-            this.third = statements();
-        } 
-        else {
-            this.third = null;
-        }
-        
-        advance( "end" );
-        eos();
-        
-        this.arity = "statement";
-        return this;
-    });
+    };
+     
+    stmt( "if", ifElseIf );
+    stmt( "elseif", ifElseIf ); 
 
     stmt("return", function () {
         if( token.id !== "(nl)" ) {
