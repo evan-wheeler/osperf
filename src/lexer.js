@@ -131,8 +131,10 @@ Lexer.prototype = {
                 else if( ch === "$" ) { 
                     result = makeToken( "operator", "$", this.line, from, this.pos, colFrom, this.linePos );
                 }
-                else if( ( "+-%<>=!".indexOf( ch ) != -1 && ch1 === "=" ) ||
+                else if( ( "&^|+-*/%<>=!".indexOf( ch ) != -1 && ch1 === "=" ) ||
                    ( ch === "<" && ch1 === ">" ) || 
+                   ( ch === "<" && ch1 === "<" ) || 
+                   ( ch === ">" && ch1 === ">" ) || 
                    ( ch === "|" && ch1 === "|" ) ||
                    ( ch === "&" && ch1 === "&" ) ||
                    ( ch === "&" && ch1 === "&" ) ||

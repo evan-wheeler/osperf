@@ -15,7 +15,7 @@ function make_parser( options ) {
     var builtinTypes = util.union( [ 
                         "Assoc", 
                         "Bytes", "Boolean",
-                        "CapiConnect", "CacheTree",
+                        "CapiConnect", "CacheTree", "CAPILOGIN",
                         "Date", "Dynamic", "DAPINode", "DAPISession", "DAPIVersion", "DAPIStream", "DOMAttr",  "DOMCDATASection",  "DOMCharacterData",  "DOMComment", 
                             "DOMDocument",  "DOMDocumentFragment",  "DOMDocumentType", 
                             "DOMElement",  "DOMEntity",  "DOMEntityReference",  "DOMImplementation", 
@@ -30,7 +30,7 @@ function make_parser( options ) {
                         "Object", "ObjRef",
                         "Pattern",  "PatFind",  "PatChange",
                         "Real", "RegEx", "Record", "RecArray",
-                        "String",
+                        "String", "Script",
                         "UAPISESSION",  "UAPIUSER", "ULong",
                         "WAPISESSION",  "WAPIMAP","WAPIMAPTASK","WAPIWORK","WAPISUBWORK",  
                         "SAXParser",  "XSLProcessor" 
@@ -293,7 +293,7 @@ function make_parser( options ) {
     var original_symbol = {
         nud: function () {
             if( this.arity === 'name' ) {
-                console.warn( "%s was not defined", this.value );
+                // console.warn( "%s was not defined", this.value );
                 return this;
             }
 
@@ -439,8 +439,17 @@ function make_parser( options ) {
     };
 
     assignment("=");
+
     assignment("+=");
     assignment("-=");
+
+    assignment("*=");
+    assignment("/=");
+    assignment("%=");
+
+    assignment("&=");
+    assignment("|=");
+    assignment("^=");
 
     infix("?", 20, function (left) {
         this.first = left;
@@ -470,6 +479,9 @@ function make_parser( options ) {
     infixr(">", 40);
     infixr(">=", 40);
 
+    infixr( "<<", 45 );
+    infixr( ">>", 45 );    
+    
     infix( "in", 50 );
     
     infix("+", 50);
