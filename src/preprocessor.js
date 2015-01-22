@@ -85,10 +85,6 @@ function directive() {
             dir = directives[ v ],
             params = [];
             
-        if( !dir ) {                
-            token_error( token );
-        }
-        
         // collect all tokens until eol.
         while( true ) { 
             advance(false);
@@ -105,9 +101,31 @@ function directive() {
         }
         
         // process the directive.
-        dir( t, params );
+        if( dir ) { 
+            dir( t, params );
+        }
+        else if( directiveStack.on() ) {
+            // throw error if we're collecting tokens.
+            token_error( token );
+        }
     }
-    else token_error( token );
+    else {
+        if( directiveStack.on() ) { 
+            // this is an error if we're collecting tokens.
+            token_error( token );
+        }
+        else {      
+            // if we're not collecting tokens, we can skip to end of line.
+            while( token && !isNewline( token ) ) { 
+                advance(false);
+            }
+            
+            if ( isNewline( token ) ) {
+                // one more.
+                advance(false);
+            }
+        }
+    }
 }    
 
 function isNewline( t ) { 
@@ -120,7 +138,7 @@ function preprocess(tokenList) {
     
     macros = new Macros( { 
                     canEvalItem: isValidMacroName, 
-                    valueFn: function(t) { return t.value; } 
+                    valueFn: function(t) { return typeof( t ) === 'undefined' ? null : t.value; } 
                 } );
     
     tokens = tokenList;
