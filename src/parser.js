@@ -16,7 +16,7 @@ function make_parser( options ) {
                         "Assoc", 
                         "Bytes", "Boolean",
                         "CapiConnect", "CacheTree", "CAPILOGIN", "CAPILog", "CAPIErr",
-                        "Date", "Dynamic", "DAPINode", "DAPISession", "DAPIVersion", "DAPIStream", "DOMAttr",  "DOMCDATASection",  "DOMCharacterData",  "DOMComment", 
+                        "Dialog", "Date", "Dynamic", "DAPINode", "DAPISession", "DAPIVersion", "DAPIStream", "DOMAttr",  "DOMCDATASection",  "DOMCharacterData",  "DOMComment", 
                             "DOMDocument",  "DOMDocumentFragment",  "DOMDocumentType", 
                             "DOMElement",  "DOMEntity",  "DOMEntityReference",  "DOMImplementation", 
                             "DOMNamedNodeMap",  "DOMNode",  "DOMNodeList",  "DOMNotation",  "DOMParser", 
@@ -614,15 +614,33 @@ function make_parser( options ) {
     prefixist("$$");
     prefixist("$");
 
-    prefix("not", function () {
+    /* prefix("not", function () {
             this.first = expression(70);
             this.arity = "unary";
             this.id = "!";
             return this;
-    } );
+    } );*/
     
     prefix("!");
     prefix("-");
+    
+    prefix( "#", function() { 
+        // this is a special case where the following 
+        // identifier should be treated as a literal
+        // hex value.
+        
+        if( token.arity === "name" && /^[a-fA-F0-9]+$/.test( token.value ) ) { 
+            this.arity = "literal";
+            this.value = "#" + token.value;
+            this.id = "(literal)";
+            advance();
+        }
+        else { 
+            token_error( token, "Expected hexadecimal value" );
+        }
+        
+        return this;
+    } );
     
     // List literals
 
@@ -855,8 +873,8 @@ function make_parser( options ) {
 
     stmt("break", function () {
         eos();
-        
-        if ( token.id !== "end" && token.id !== '(end)' ) {
+
+        if ( token.id !== "end" && token.id !== 'elseif' && token.id !== 'else' && token.id !== '(end)' ) {
             if( options.unreachable_code_errors ) { 
                 token_error( token,"Unreachable statement.");
             }
@@ -876,9 +894,11 @@ function make_parser( options ) {
 
     stmt("continue", function () {
         eos();
-        
-        if ( token.id !== "end" && token.id !== '(end)' ) {
-            token_error( token,"Unreachable statement.");
+
+        if ( token.id !== "end" && token.id !== 'elseif' && token.id !== 'else' && token.id !== '(end)' ) {
+            if( options.unreachable_code_errors ) {
+                token_error( token,"Unreachable statement.");
+            }
         }
 
         this.arity = "statement";

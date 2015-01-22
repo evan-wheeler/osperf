@@ -16,7 +16,8 @@ program.version('0.0.1')
     .option( '-s, --search <pattern>', 'Instrument files that match the specified glob [**/*.Script]', '**/*.Script' )
     .option( '-f, --file <path> [files...]', 'Instrument a file', collect, [] )
     .option( '-u, --unmangled', "Don't mangle function identifiers" )
-    .option( '-m, --manglefile <file>', "Write unmangled function identifiers to <file>", "mangled.txt" )
+    .option( '-m, --manglefile <file>', "Write unmangled function identifiers to <file>", "functions.json" )
+    .option( "-v, --verbose", "Turn on verbose output" )
     .parse(process.argv);
 
 var mangler = null,
@@ -44,7 +45,7 @@ function main() {
     if( !program.unmangled ) { 
         var t = Mangler();
         mangler = t.assigner;
-        getManagledIDs = t.getIDs;
+        getMangledIDs = t.getIDs;
     }
     var glob_options = { root: program.base };
 
@@ -65,11 +66,14 @@ function main() {
 
 function onAllFilesDone( err ) { 
     if( err ) { 
-        console.log( "Error during processing: ", err );
+        console.error( "Error during processing: ", err );
     }   
     else {
         if( !program.unmangled ) {
-            console.log( "Writing mangled names file..." );
+            if( program.verbose ) {
+                console.log( "Writing mangled names file..." );
+            }
+            
             fs.writeFileSync( program.manglefile, JSON.stringify( getMangledIDs() ), { encoding: 'utf8' } );
         }
         console.log( "Done" );
@@ -81,8 +85,12 @@ function startParse( path, donecb ) {
         path, 
         { encoding: 'utf8' }, 
         function doneReadingFile( err, content ) { 
-            if( err ) donecb( err );
-            onReadFile( path, content, donecb );
+            if( err ) { 
+                donecb( err );
+            }
+            else {
+                onReadFile( path, content, donecb );
+            }
         }
     )
 }
@@ -95,28 +103,20 @@ function onReadFile( path, contents, donecb ) {
         funcID = path.replace( /^.*ospace_src\//, '' ).replace( /\//g, "::" ).replace( /Script$/, "" );
     }
     catch( e ) { 
-        
-        var err = {
-            file: path,
-            error: e };
-    
-        donecb( err );
+        e.file = path;
+        donecb( e );
         return;
     }
 
     var instrumentedCode = instrument( funcID, contents, parseTree, mangler );
     
-    fs.writeFile( path, instrumentedCode, { encoding: 'utf8' }, 
-        function doneWriting(err) {
-            if( err ) {
-                donecb( err );
-            }
-            else { 
-                console.log( "Instrumented ", path );
-                donecb();
-            }
-        } 
-    );
+    fs.writeFileSync( path, instrumentedCode, { encoding: 'utf8' } );
+    
+    if( program.verbose ) { 
+        console.log( "Instrumented ", path );
+    }
+    
+    donecb();
 }
 
 function processFiles( files, allDoneCB ) {

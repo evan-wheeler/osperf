@@ -125,7 +125,7 @@ Lexer.prototype = {
                     state = NUMBER_NO_DECIMAL;
                     token = ch;
                 }
-                else if( ch === '#' && /[0-9a-fA-F]/.test( ch1 ) ) { 
+                else if( ch === '#' && /[0-9]/.test( ch1 ) ) { 
                     state = OBJ_LITERAL;
                     token = '#';
                 }
