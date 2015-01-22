@@ -6951,12 +6951,12 @@ DirectiveStack.prototype = {
     },
     
     invert: function() { 
-        var i = this._stack.length - 1;
+        var i =  this._stack.length - 1;
         if( i < 0 ) {
             throw "stack is empty";
         }
-        this._stack[ len-1] = !this._stack[i];
-        this._on = _calcOn();
+        this._stack[i] = !this._stack[i];
+        this._on = this._calcOn();
     },
     
     pop: function() { 
@@ -7016,12 +7016,12 @@ function add( funcID, pos, profileFunc ) {
 }
 
 function enterFn( funcID, node ) { 
-    return { insert_pos: node.to + 1, content: "\tString __fid='" + funcID + "'; Dynamic __prf=$Pflr;__prf.I(__fid)\n" }; 
+    return { insert_pos: node.to + 1, content: "\n\tDynamic __f='" + funcID + "'; Object __p=$Pflr;__p.I(__f,this)\n" }; 
 }
 
 function exitFn( code, node ) {
     var indent = findIndent( code, node.from );
-    return { insert_pos: node.from, content: "\t__prf.O(__fid)\n" }; 
+    return { insert_pos: node.from, content: "\t__p.O(__f)\n" }; 
 } 
 
 function returnFn( code, node ) {
@@ -7030,7 +7030,7 @@ function returnFn( code, node ) {
     // if the return value is not a simple value, first store it in a temporary variable before returning...
 
     if( isSimpleOp( node.first ) ) {
-        return { insert_pos: node.from, content: "__prf.O(__fid)\n" + indentStr };
+        return { insert_pos: node.from, content: "__p.O(__f)\n" + indentStr };
     }
     
     //                                     ++++++++++      +++++++++++              ++++++++++++++++++++++++++++++++++++++++++        
@@ -7045,7 +7045,7 @@ function returnFn( code, node ) {
     return [
         { insert_pos: returnEnd+1, content: rTmpID + "=" },
         { insert_pos: returnBegin, content: "Dynamic __" },
-        { insert_pos: returnExprEnd, content: [ "; __prf.O(__fid); return ", tmpVar, "\n", indentStr ].join( '' ) }
+        { insert_pos: returnExprEnd, content: [ "; __p.O(__f); return ", tmpVar, "\n", indentStr ].join( '' ) }
     ];
 }
 
@@ -7077,7 +7077,11 @@ function findIndent( code, pos ) {
     return indentStr;
 }
 
-function instrument( scriptPath, code, parseTree ) { 
+function defaultIDAssigner( scriptRefStr, funcName ) { 
+    return scriptRefID + funcName;
+}
+
+function instrument( scriptRefStr, code, parseTree, manglerFn ) { 
     
     // walk the parse tree and add code at the beginning of each function definition, before 
     // each return function, and at the end of each function body.
@@ -7088,7 +7092,7 @@ function instrument( scriptPath, code, parseTree ) {
         
     functions.forEach( function( node ) { 
         if( node && node.id === "function" ) { 
-            var funcID = scriptPath + node.name;
+            var funcID = manglerFn( scriptRefStr, node.name );
             
             // instrument the start and end of the function
             edits.push( enterFn( funcID, node.start ) );
@@ -7111,6 +7115,7 @@ function instrument( scriptPath, code, parseTree ) {
         }
     } );
 
+    // return the instrumented code.
     return applyEdits( code, edits );
 }
 
@@ -7266,8 +7271,10 @@ Lexer.prototype = {
                 else if( ch === "$" ) { 
                     result = makeToken( "operator", "$", this.line, from, this.pos, colFrom, this.linePos );
                 }
-                else if( ( "+-%<>=!".indexOf( ch ) != -1 && ch1 === "=" ) ||
+                else if( ( "&^|+-*/%<>=!".indexOf( ch ) != -1 && ch1 === "=" ) ||
                    ( ch === "<" && ch1 === ">" ) || 
+                   ( ch === "<" && ch1 === "<" ) || 
+                   ( ch === ">" && ch1 === ">" ) || 
                    ( ch === "|" && ch1 === "|" ) ||
                    ( ch === "&" && ch1 === "&" ) ||
                    ( ch === "&" && ch1 === "&" ) ||
@@ -7571,7 +7578,7 @@ function make_parser( options ) {
     var builtinTypes = util.union( [ 
                         "Assoc", 
                         "Bytes", "Boolean",
-                        "CapiConnect", "CacheTree",
+                        "CapiConnect", "CacheTree", "CAPILOGIN",
                         "Date", "Dynamic", "DAPINode", "DAPISession", "DAPIVersion", "DAPIStream", "DOMAttr",  "DOMCDATASection",  "DOMCharacterData",  "DOMComment", 
                             "DOMDocument",  "DOMDocumentFragment",  "DOMDocumentType", 
                             "DOMElement",  "DOMEntity",  "DOMEntityReference",  "DOMImplementation", 
@@ -7586,7 +7593,7 @@ function make_parser( options ) {
                         "Object", "ObjRef",
                         "Pattern",  "PatFind",  "PatChange",
                         "Real", "RegEx", "Record", "RecArray",
-                        "String",
+                        "String", "Script",
                         "UAPISESSION",  "UAPIUSER", "ULong",
                         "WAPISESSION",  "WAPIMAP","WAPIMAPTASK","WAPIWORK","WAPISUBWORK",  
                         "SAXParser",  "XSLProcessor" 
@@ -7849,7 +7856,7 @@ function make_parser( options ) {
     var original_symbol = {
         nud: function () {
             if( this.arity === 'name' ) {
-                console.warn( "%s was not defined", this.value );
+                // console.warn( "%s was not defined", this.value );
                 return this;
             }
 
@@ -7995,8 +8002,17 @@ function make_parser( options ) {
     };
 
     assignment("=");
+
     assignment("+=");
     assignment("-=");
+
+    assignment("*=");
+    assignment("/=");
+    assignment("%=");
+
+    assignment("&=");
+    assignment("|=");
+    assignment("^=");
 
     infix("?", 20, function (left) {
         this.first = left;
@@ -8026,6 +8042,9 @@ function make_parser( options ) {
     infixr(">", 40);
     infixr(">=", 40);
 
+    infixr( "<<", 45 );
+    infixr( ">>", 45 );    
+    
     infix( "in", 50 );
     
     infix("+", 50);

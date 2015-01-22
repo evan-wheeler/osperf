@@ -2,7 +2,9 @@ var fs = require( 'fs' ),
     Parser = require( './src/parser' ),
     instrument = require( './src/instrument' ),
     glob = require("glob"),
-    program = require('commander');
+    program = require('commander'),
+    async = require( 'async' ),
+    _ = require( 'lodash' );
     
 function collect(val, list) {
   list.push(val);
@@ -13,50 +15,110 @@ program.version('0.0.1')
     .option( '-b, --base <dir>', 'Base path to search', process.cwd() )
     .option( '-s, --search <pattern>', 'Instrument files that match the specified glob [**/*.Script]', '**/*.Script' )
     .option( '-f, --file <path> [files...]', 'Instrument a file', collect, [] )
+    .option( '-u, --unmangled', "Don't mangle function identifiers" )
+    .option( '-m, --manglefile <file>', "Write unmangled function identifiers to <file>", "mangled.txt" )
     .parse(process.argv);
 
-var glob_options = { root: program.base };
+var mangler = null,
+    getMangledIDs = null;
 
-if( program.file.length ) { 
-    process.nextTick( processFiles.bind( null, null, program.file ) );
-}
-else if( program.search ) { 
-    glob( program.search, glob_options, processFiles );
-}
-
-function startParse( path ) { 
-    fs.readFile( path, { encoding: 'utf8' }, onReadFile.bind( null, path ) )
-}
-
-function onReadFile( path, err, contents ) { 
-    if( err ) { 
-        console.error( "Error onReadFile: ", err );
-        return;
-    }
+function Mangler() { 
+    var idToName = {};
+    var nextID = 0;
     
+    return { 
+        assigner: function(scriptPath, functionName) { 
+            idToName[nextID] = scriptPath + functionName;
+            return nextID++;
+        },
+        getIDs: function() { 
+            return idToName;
+        }
+    };
+}
+
+main();
+
+function main() { 
+
+    if( !program.unmangled ) { 
+        var t = Mangler();
+        mangler = t.assigner;
+        getManagledIDs = t.getIDs;
+    }
+    var glob_options = { root: program.base };
+
+    if( program.file.length ) { 
+        process.nextTick( processFiles.bind( null, program.file, onAllFilesDone ) );
+    }
+    else if( program.search ) { 
+        glob( program.search, glob_options, function onGlob( err, files ) { 
+            if( err ) {
+                console.error( err );
+            }
+            else { 
+                processFiles( files, onAllFilesDone );
+            } 
+        } );
+    }
+}
+
+function onAllFilesDone( err ) { 
+    if( err ) { 
+        console.log( "Error during processing: ", err );
+    }   
+    else {
+        if( !program.unmangled ) {
+            console.log( "Writing mangled names file..." );
+            fs.writeFileSync( program.manglefile, JSON.stringify( getMangledIDs() ), { encoding: 'utf8' } );
+        }
+        console.log( "Done" );
+    }
+}
+
+function startParse( path, donecb ) { 
+    fs.readFile( 
+        path, 
+        { encoding: 'utf8' }, 
+        function doneReadingFile( err, content ) { 
+            if( err ) donecb( err );
+            onReadFile( path, content, donecb );
+        }
+    )
+}
+
+function onReadFile( path, contents, donecb ) { 
     var p = Parser( [] ), parseTree, funcID;
     
     try { 
         parseTree = p.parse( contents );
-        funcID = path.replace( /^.*ospace_src\//, '' ).replace( /\//g, "." );
-        console.log( "Instrumenting ", path );
+        funcID = path.replace( /^.*ospace_src\//, '' ).replace( /\//g, "::" ).replace( /Script$/, "" );
     }
     catch( e ) { 
-        console.error( "Caught Exception: ", e.message, ", line: ", e.line );
-        return
-    }
+        
+        var err = {
+            file: path,
+            error: e };
     
-    fs.writeFile( path, instrument( funcID, contents, parseTree ), { encoding: 'utf8' }, onWroteFile.bind( null, path ) );
+        donecb( err );
+        return;
+    }
+
+    var instrumentedCode = instrument( funcID, contents, parseTree, mangler );
+    
+    fs.writeFile( path, instrumentedCode, { encoding: 'utf8' }, 
+        function doneWriting(err) {
+            if( err ) {
+                donecb( err );
+            }
+            else { 
+                console.log( "Instrumented ", path );
+                donecb();
+            }
+        } 
+    );
 }
 
-function onWroteFile( path, err ) { 
-  if (err) { 
-    console.error( "Error: ", err );
-    return;
-  } 
-  console.log( "Saved ", path );
-}
-
-function processFiles( err, files ) {
-    files.forEach( startParse );
+function processFiles( files, allDoneCB ) {
+    async.eachLimit( files, 10, startParse, allDoneCB );   
 }
