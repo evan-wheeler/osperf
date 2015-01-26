@@ -1,6 +1,11 @@
-function Lexer(){ 
-    this.code = ""; 
-    this.pos = 0;
+function Lexer( code ){ 
+    if( code !== null && typeof code !== 'undefined' ) { 
+        this.setInput( code );
+    }
+    else { 
+        this.code = ""; 
+        this.pos = 0;
+    }
 }
 
 module.exports = Lexer;
@@ -36,6 +41,10 @@ Lexer.prototype = {
         this.done = ( this.code.length === 0 );
         this.curToken = null;
         this.indent = "";
+    },
+    
+    getSource: function() { 
+        return this.code || "";
     },
     
     readNextToken: function() { 

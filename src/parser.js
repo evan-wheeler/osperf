@@ -48,7 +48,8 @@ function make_parser( options ) {
         'and': '&&',
         'not': '!'
     };
-                            
+
+    var lex = null;
     var scope;
     var symbol_table = {};
     var token;
@@ -768,18 +769,18 @@ function make_parser( options ) {
 
         // keep a reference to the first token (end of statement character)
         this.start = token;
-
         eos();
 
-        this.second = statements();
+        this.body = statements();
 
         // keep a reference to the last token
         this.end = token;
-        
         advance("end");
 
         this.arity = "function";
         scope.pop();
+
+        this.eos = token;
         eos();
         
         return this;
@@ -826,26 +827,24 @@ function make_parser( options ) {
         this.first = expression(0);
         eos();
         
-        this.second = statements();
+        this.body = statements();
         skip_newlines();
       
         if ( token.id === "elseif" ) {
-            this.third = statement();
+            this.altBody = statement();
             
-            // final 'end' will be taken care of by original if.
+            // final 'end' will be matched by original if.
             this.arity = "statement";
             return this;
         }
         else if (token.id === "else") {
             advance("else");
             eos();
-            this.third = statements();
+            this.altBody = statements();
         } 
-        else {
-            this.third = null;
-        }
         
         advance( "end" );
+        this.eos = token;
         eos();
         
         this.arity = "statement";
@@ -859,6 +858,7 @@ function make_parser( options ) {
         if( token.id !== "(nl)" ) {
             this.first = expression(0);
         } 
+        
         this.eos = token;
         eos();
         
@@ -920,8 +920,11 @@ function make_parser( options ) {
         this.eos = token;
         eos();
         
-        this.second = statements();
-        advance("end");eos();
+        this.body = statements();
+        advance("end");
+        
+        this.eos = token;
+        eos();
         
         this.arity = "statement";
         
@@ -931,11 +934,13 @@ function make_parser( options ) {
     stmt("repeat", function () {
         eos();
 
-        this.first = statements();
+        this.body = statements();
         
         advance("until");
         
         this.second = expression(0);
+        
+        this.eos = token;
         eos();
         
         this.arity = "statement";
@@ -943,8 +948,7 @@ function make_parser( options ) {
     });
     
     stmt( "for", function() { 
-        var lookBodyName = "third";
-        
+    
         if( token.id === '(' ) { 
             advance( '(' );
 
@@ -956,10 +960,11 @@ function make_parser( options ) {
             advance( '(nl)' );
 
             this.third = ( token.id !== ')' ) ? expression(0) : null;
+                        
             advance( ')' );
             eos();
 
-            this.fourth = statements();
+            this.body = statements();
 
             this.id = "for_c";
         }
@@ -981,7 +986,7 @@ function make_parser( options ) {
                 this.third = expression(0);
                 eos();
                 
-                this.fourth = statements();                
+                this.body = statements();                
                 this.id = "for";
             }
             else if( token.id === "in" ) { 
@@ -989,7 +994,7 @@ function make_parser( options ) {
                 this.first = expression( 0 );
                 eos();
                 
-                this.second = statements();
+                this.body = statements();
                 this.id = "for_in";
             }
             else {
@@ -1001,6 +1006,7 @@ function make_parser( options ) {
         }
         
         advance( "end" );
+        this.eos = token;
         eos();
         this.arity = "statement";
         return this;
@@ -1046,9 +1052,11 @@ function make_parser( options ) {
             advance( "end" );
             eos();
         }
-            
+                
         // end of switch
         advance( "end" );
+
+        this.eos = token;
         eos();
 
         this.arity = "switch";
@@ -1063,8 +1071,13 @@ function make_parser( options ) {
     } );
     
     return { 
+    
         getTokens: function() { 
             return tokens;
+        },
+        
+        getSource: function() { 
+            return lex ? lex.getSource() : "";
         },
         
         parse: function parse( source ) {   
@@ -1076,9 +1089,9 @@ function make_parser( options ) {
             token_nr = 0;
             
             // Init the lexer and read all the tokens into our token buffer.
-            var lex = new Lexer(),
-                t;
-            lex.setInput( source );
+            lex = new Lexer( source );
+
+            var t;
             
             while( ( t = lex.get() ) !== null ) { 
                 tokens.push( t );

@@ -1,48 +1,52 @@
 // instrument.js
 
-var util = require( './util' );
-  
-function applyEdits( code, edits ) { 
+var util = require( './util' ),
+    partialCompare = require( './compare' ),
+    EditList = require( './edits' );
 
-    edits.sort( function( a, b ) { 
-        return a.insert_pos - b.insert_pos;
-    } );
-    
-    var buffers = [], i = -1, len = edits.length, lastPos = 0;
-    
-    while( ++i < len ) {
-        var edit = edits[i];
-        buffers.push( code.substring( lastPos, edit.insert_pos ) );
-        buffers.push( edit.content );
-        lastPos = edit.insert_pos;
-    }
-    
-    if( lastPos < code.length ) {
-        buffers.push( code.substring( lastPos, code.length ) );
-    }   
+function isInstrumented( funcBody ) {
 
-    return buffers.join( "" );
+    var __fDeclr = {
+        "arity": "binary",
+        "value": "=",
+        "first": {
+            "arity": "name",
+            "value": "__f",
+            "id": "(name)"
+        },
+        "second": {
+            "arity": "literal",
+            /* "value": "path_to_x", */
+            "id": "(literal)"
+        },
+        "id": "=",
+        "dataType": {
+            "arity": "name",
+            "value": "Dynamic",
+            "id": "dynamic"
+        }
+    };
+
+    return funcBody && funcBody.length && partialCompare( funcBody[0], __fDeclr );
 }
 
-function add( funcID, pos, profileFunc ) {
+function enterFn( editList, funcID, node ) { 
+    editList.insert( "\n\tDynamic __f='" + funcID + "'; Object __p=$Pflr;__p.I(__f,this)\n", node.to + 1 );
 }
 
-function enterFn( funcID, node ) { 
-    return { insert_pos: node.to + 1, content: "\n\tDynamic __f='" + funcID + "'; Object __p=$Pflr;__p.I(__f,this)\n" }; 
-}
-
-function exitFn( code, node ) {
+function exitFn( editList, code, node ) {
     var indent = findIndent( code, node.from );
-    return { insert_pos: node.from, content: "\t__p.O(__f)\n" }; 
+    editList.insert( "\t__p.O(__f)\n", node.from ); 
 } 
 
-function returnFn( code, node ) {
+function returnFn( editList, code, node ) {
     var indentStr = findIndent( code, node.from );
     
     // if the return value is not a simple value, first store it in a temporary variable before returning...
 
     if( isSimpleOp( node.first ) ) {
-        return { insert_pos: node.from, content: "__p.O(__f)\n" + indentStr };
+        editList.insert( "__p.O(__f)\n" + indentStr, node.from );
+        return;
     }
     
     //                                     ++++++++++      +++++++++++              ++++++++++++++++++++++++++++++++++++++++++        
@@ -53,12 +57,14 @@ function returnFn( code, node ) {
         returnEnd = node.to,
         rTmpID = "" + returnBegin,
         tmpVar = "__return" + rTmpID;
-    
-    return [
-        { insert_pos: returnEnd+1, content: rTmpID + "=" },
-        { insert_pos: returnBegin, content: "Dynamic __" },
-        { insert_pos: returnExprEnd, content: [ "; __p.O(__f); return ", tmpVar, "\n", indentStr ].join( '' ) }
-    ];
+
+    var full_str = code.substring( returnBegin, returnExprEnd + 1 );
+    var return_str = code.substring( returnBegin, returnEnd + 1 );
+    var expr_str = code.substring( returnEnd, returnExprEnd + 1 );
+        
+    editList.insert( rTmpID + "=", returnEnd + 1 );
+    editList.insert( "Dynamic __", returnBegin );
+    editList.insert(  "; __p.O(__f); return " + tmpVar + "\n" + indentStr, returnExprEnd );
 }
 
 function isSimpleOp( node ) { 
@@ -89,63 +95,72 @@ function findIndent( code, pos ) {
     return indentStr;
 }
 
-function defaultIDAssigner( scriptRefStr, funcName ) { 
-    return scriptRefID + funcName;
+function defaultMangler( scriptRefStr, funcName ) { 
+    return scriptRefStr + funcName;
 }
 
 function instrument( scriptRefStr, code, parseTree, manglerFn ) { 
-    
     // walk the parse tree and add code at the beginning of each function definition, before 
     // each return function, and at the end of each function body.
     
+    manglerFn = manglerFn || defaultMangler;
+    
     // walk the top level looking for functions...
-    var edits = [],
+    var editsList = new EditList( code ),
         functions = util.isArray( parseTree ) ? parseTree : [ parseTree ];
-        
-    functions.forEach( function( node ) { 
+    
+    var alreadyInstrumented = false;
+    
+    functions.every( function( node ) { 
         if( node && node.id === "function" ) { 
             var funcID = manglerFn( scriptRefStr, node.name );
+
+            var funcBody = util.isArray( node.body ) ? ( node.body || [] ) : [ node.body ];
+
+            if( isInstrumented( funcBody ) ) { 
+                alreadyInstrumented = true;
+                return false;
+            }
             
             // instrument the start and end of the function
-            edits.push( enterFn( funcID, node.start ) );
-            
-            var funcBody = util.isArray( node.second ) ? ( node.second || [] ) : [ node.second ];
-            
+            enterFn( editsList, funcID, node.start );
+
             // instrument any returns in the body of the function.
-            edits = edits.concat( instrumentReturns( code, funcBody ) );
+            instrumentReturns( editsList, code, funcBody );
             
             var lastStatement = null;
-
-            if( funcBody.length ) { 
+            
+            if( funcBody.length ) {
                 lastStatement = ( funcBody[funcBody.length - 1] || {} ).id;
             }
             
             if( lastStatement !== "return" ) { 
                 // instrument the exit of the function
-                edits.push( exitFn( code, node.end ) );
+                exitFn( editsList, code, node.end );
             }
         }
+        return true;
     } );
-
+    
     // return the instrumented code.
-    return applyEdits( code, edits );
+    return alreadyInstrumented ? code : editsList.apply();
 }
 
-function instrumentReturns( code, node ) {
-    var edits = [], children = [];
+function instrumentReturns( editList, code, node ) {
+    var children = [];
     
     if( node ) {
         if( node.id === "return" ) {                
-            return returnFn( code, node );
+            returnFn( editList, code, node );
+            return;
         }
         
-        children = util.isArray( node ) ? node : util.compact( [ node.first, node.second, node.third, node.fourth ] );
+        children = util.isArray( node ) ? node : util.compact( [ node.first, node.second, node.third, node.fourth, node.body, node.bodyAlt ] );
         
         children.forEach( function( n ) { 
-            edits = edits.concat( instrumentReturns( code, n ) );
+            instrumentReturns( editList, code, n );
         } );
     }    
-    return edits;
 } 
 
 module.exports = instrument;

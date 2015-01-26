@@ -1,6 +1,7 @@
 var Parser = require( '../src/parser' ),
     Lexer = require( '../src/lexer' ),
     instrument = require( '../src/instrument' ),
+    coverage = require( '../src/coverage' ),
     _ = require( 'lodash' );
 
 function doLexer(src) { 
@@ -80,7 +81,7 @@ function go(source) {
         tree = parser.parse( source );
         endTime = performance.now();
 
-        msg = JSON.stringify( tree, [ 'arity', 'value', 'left', 'right', 'first', 'second', 'third', 'fourth', 'direction', 'label', 'id', 'declaration', "dataType", "returnType", "name" ], 3 );
+        msg = JSON.stringify( tree, [ 'arity', 'value', 'left', 'right', 'first', 'second', 'third', 'fourth', 'body', 'bodyAlt', 'direction', 'label', 'id', 'declaration', "dataType", "returnType", "name", 'eos' ], 3 );
     } catch (e) {
         endTime = performance.now();
         msg = JSON.stringify( e );
@@ -101,7 +102,20 @@ function doInstrument(editor) {
     
     try {
         var tree = parser.parse( source );
-        var result = instrument( "path.", source, tree );
+        var result = instrument( "path.", parser.getSource(), tree );
+        editor.setValue( result );
+    } catch (e) {
+        window.alert( e.message );
+    }
+}
+
+function doCodeCoverage(editor) {
+    var parser = Parser(),
+        source = editor.getValue();
+    
+    try {
+        var tree = parser.parse( source );
+        var result = coverage( "path.", parser.getSource(), tree );
         editor.setValue( result );
     } catch (e) {
         window.alert( e.message );
@@ -137,6 +151,10 @@ $( function() {
     
     $( '#instrument' ).click( function() { 
         doInstrument( editor );
+    } );
+
+    $( '#codecoverage' ).click( function() { 
+        doCodeCoverage( editor );
     } );
     
     $( '#wrapNL' ).click( doParse );
