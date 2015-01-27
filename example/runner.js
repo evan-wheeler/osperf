@@ -81,7 +81,7 @@ function go(source) {
         tree = parser.parse( source );
         endTime = performance.now();
 
-        msg = JSON.stringify( tree, [ 'arity', 'value', 'left', 'right', 'first', 'second', 'third', 'fourth', 'body', 'bodyAlt', 'direction', 'label', 'id', 'declaration', "dataType", "returnType", "name", 'eos' ], 3 );
+        msg = JSON.stringify( tree, [ 'arity',  'id', 'value', 'first', 'second', 'third', 'fourth', 'direction', 'label','declaration', "dataType", "name",  'body', 'altBody', "returnType", 'eos' ], 3 );
     } catch (e) {
         endTime = performance.now();
         msg = JSON.stringify( e );

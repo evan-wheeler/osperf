@@ -82,7 +82,7 @@ function go(source) {
         tree = parser.parse( source );
         endTime = performance.now();
 
-        msg = JSON.stringify( tree, [ 'arity', 'value', 'left', 'right', 'first', 'second', 'third', 'fourth', 'body', 'bodyAlt', 'direction', 'label', 'id', 'declaration', "dataType", "returnType", "name", 'eos' ], 3 );
+        msg = JSON.stringify( tree, [ 'arity', 'value', 'left', 'right', 'first', 'second', 'third', 'fourth', 'body', 'altBody', 'direction', 'label', 'id', 'declaration', "dataType", "returnType", "name", 'eos' ], 3 );
     } catch (e) {
         endTime = performance.now();
         msg = JSON.stringify( e );
@@ -7223,11 +7223,11 @@ function instrument( scriptRefStr, code, parseTree, manglerFn ) {
     
     // walk the top level looking for functions...
     var editsList = new EditList( code ),
-        functions = util.isArray( parseTree ) ? parseTree : [ parseTree ];
+        statements = util.isArray( parseTree ) ? parseTree : [ parseTree ];
     
     var alreadyInstrumented = false;
     
-    functions.every( function( node ) { 
+    statements.every( function( node ) { 
         if( node && node.id === "function" ) { 
             var funcID = manglerFn( scriptRefStr, node.name );
 

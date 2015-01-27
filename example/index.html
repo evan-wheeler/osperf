@@ -133,7 +133,7 @@
 </head>
 <body>
     <div id='main'>
-        <div id="editor">function String foo( String arg1=&apos;23&apos; )&#13;&#09;String x = "This is editable"&#13;&#09;return x&#13;end</div>    
+        <div id="editor">function String foo( String arg1=&apos;23&apos; )&#13;&#09;String x = "This is editable"&#13;&#09;if x[:4] == "This" &amp;&amp; Str.CmpI( x[:4], "this" ) == 0&#13;&#09;&#09;Echo( "It worked" )&#13;&#09;&#09;return "a" + "b" + arg1&#13;&#09;end&#13;&#09;return x&#13;end</div>    
 
         <div class='box wrapNLBox'>
             <span style='float:right'><input type='checkbox' id='wrapNL' checked> Wrap Newlines</span>

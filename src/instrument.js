@@ -107,11 +107,11 @@ function instrument( scriptRefStr, code, parseTree, manglerFn ) {
     
     // walk the top level looking for functions...
     var editsList = new EditList( code ),
-        functions = util.isArray( parseTree ) ? parseTree : [ parseTree ];
+        statements = util.isArray( parseTree ) ? parseTree : [ parseTree ];
     
     var alreadyInstrumented = false;
     
-    functions.every( function( node ) { 
+    statements.every( function( node ) { 
         if( node && node.id === "function" ) { 
             var funcID = manglerFn( scriptRefStr, node.name );
 
