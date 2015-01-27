@@ -7,73 +7,69 @@ var util = require( './util' ),
 function isInstrumented( funcBody ) {
 
     var __fDeclr = {
-        "arity": "binary",
-        "value": "=",
-        "first": {
-            "arity": "name",
-            "value": "__f",
-            "id": "(name)"
-        },
-        "second": {
-            "arity": "literal",
-            /* "value": "path_to_x", */
-            "id": "(literal)"
-        },
-        "id": "=",
-        "dataType": {
-            "arity": "name",
-            "value": "Dynamic",
-            "id": "dynamic"
-        }
-    };
+            "type": "VariableDeclaration",
+            "declarations": [
+               {
+                  "type": "VariableDeclarator",
+                  "name": {
+                     "id": "(name)",
+                     "value": "__f"
+                  },
+                  "dataType": {
+                     "id": "dynamic",
+                     "value": "Dynamic"
+                  }
+               }
+            ]
+         };
 
     return funcBody && funcBody.length && partialCompare( funcBody[0], __fDeclr );
 }
 
-function enterFn( editList, funcID, node ) { 
-    editList.insert( "\n\tDynamic __f='" + funcID + "'; Object __p=$Pflr;__p.I(__f,this)\n", node.to + 1 );
+function enterFn( editList, funcID, code, pos ) { 
+    var indentStr = findIndent( code, pos );
+    editList.insert( "Dynamic __f='" + funcID + "'; Object __p=$Pflr;__p.I(__f,this)\n" + indentStr, pos );
 }
 
-function exitFn( editList, code, node ) {
-    var indent = findIndent( code, node.from );
-    editList.insert( "\t__p.O(__f)\n", node.from ); 
+function exitFn( editList, code, pos ) {
+    editList.insert( "\t__p.O(__f)\n", pos ); 
 } 
 
 function returnFn( editList, code, node ) {
-    var indentStr = findIndent( code, node.from );
+    var indentStr = findIndent( code, node.range[0] );
     
     // if the return value is not a simple value, first store it in a temporary variable before returning...
 
-    if( isSimpleOp( node.first ) ) {
-        editList.insert( "__p.O(__f)\n" + indentStr, node.from );
+    if( isSimpleOp( node.argument ) ) {
+        editList.insert( "__p.O(__f)\n" + indentStr, node.range[0] );
         return;
     }
     
     //                                     ++++++++++      +++++++++++              ++++++++++++++++++++++++++++++++++++++++++        
     // convert: "return ( x() * y() )" to "Dynamic __return123131232 = ( x() * y() ); __prf.O(__fid); return __return123131232"
     
-    var returnExprEnd = node.eos.from, 
-        returnBegin = node.from,
-        returnEnd = node.to,
+    var returnExprEnd = node.range[1], 
+        returnBegin = node.range[0],
+        returnEnd = returnBegin + 6,
         rTmpID = "" + returnBegin,
         tmpVar = "__return" + rTmpID;
 
     var full_str = code.substring( returnBegin, returnExprEnd + 1 );
     var return_str = code.substring( returnBegin, returnEnd + 1 );
     var expr_str = code.substring( returnEnd, returnExprEnd + 1 );
-        
-    editList.insert( rTmpID + "=", returnEnd + 1 );
+
+    editList.insert( rTmpID + "=", returnEnd );
     editList.insert( "Dynamic __", returnBegin );
-    editList.insert(  "; __p.O(__f); return " + tmpVar + "\n" + indentStr, returnExprEnd );
+    editList.insert(  "; __p.O(__f); return " + tmpVar, returnExprEnd + 1 );
 }
 
 function isSimpleOp( node ) { 
     if ( !node || node.id === "(name)" || node.id === "(literal)" || node.arity === 'literal' ) { 
         return true;
     }
-    else if( node.id === "." ) { 
-        return ( !node.first || node.first.id === "(name)" || node.first.id === "(literal)" || node.first.arity === "literal" ) && 
-                ( node.second && ( node.second.id === "(name)" || node.second.id === "(literal)" || node.second.arity === "literal" ) );
+    else if( node.type === "MemberExpression" ) { 
+        return ( !node.object || node.object.id === "(name)" || node.object.id === "(literal)" || node.object.arity === "literal" ) && 
+                ( node.property && ( node.property.id === "(name)" || node.property.id === "(literal)" || node.property.arity === "literal" ) );
     }
     return false;
 }
@@ -112,31 +108,34 @@ function instrument( scriptRefStr, code, parseTree, manglerFn ) {
     var alreadyInstrumented = false;
     
     statements.every( function( node ) { 
-        if( node && node.id === "function" ) { 
+        if( node && node.type === "FunctionDeclaration" ) { 
             var funcID = manglerFn( scriptRefStr, node.name );
 
-            var funcBody = util.isArray( node.body ) ? ( node.body || [] ) : [ node.body ];
+            var bodyStatements = null;
 
-            if( isInstrumented( funcBody ) ) { 
-                alreadyInstrumented = true;
-                return false;
-            }
-            
-            // instrument the start and end of the function
-            enterFn( editsList, funcID, node.start );
+            if( node.body ) { 
+                bodyStatements = node.body;
+                
+                if( isInstrumented( bodyStatements ) ) { 
+                    alreadyInstrumented = true;
+                    return false;
+                }
 
-            // instrument any returns in the body of the function.
-            instrumentReturns( editsList, code, funcBody );
-            
-            var lastStatement = null;
-            
-            if( funcBody.length ) {
-                lastStatement = ( funcBody[funcBody.length - 1] || {} ).id;
-            }
-            
-            if( lastStatement !== "return" ) { 
-                // instrument the exit of the function
-                exitFn( editsList, code, node.end );
+                enterFn( editsList, funcID, code, bodyStatements[0].range[0] );
+                
+                // instrument any returns in the body of the function.
+                instrumentReturns( editsList, code, bodyStatements );
+                
+                var lastStatement = null;
+                
+                if( bodyStatements.length ) {
+                    lastStatement = ( bodyStatements[bodyStatements.length - 1] || {} ).id;
+                }
+                
+                if( lastStatement !== "return" ) { 
+                    // instrument the exit of the function
+                    exitFn( editsList, code, bodyStatements[bodyStatements.length - 1].range[1] );
+                }
             }
         }
         return true;
@@ -155,7 +154,7 @@ function instrumentReturns( editList, code, node ) {
             return;
         }
         
-        children = util.isArray( node ) ? node : util.compact( [ node.first, node.second, node.third, node.fourth, node.body, node.bodyAlt ] );
+        children = util.isArray( node ) ? node : util.compact( [ node.left, node.right, node.body, node.consequent, node.alternate ] );
         
         children.forEach( function( n ) { 
             instrumentReturns( editList, code, n );

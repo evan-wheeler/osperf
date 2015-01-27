@@ -5,7 +5,8 @@
 
 var Lexer = require( './lexer' ),
     util = require( './util' ),
-    preprocessor = require( './preprocessor' );
+    preprocessor = require( './preprocessor' ),
+    clone = require( 'clone' );
     
 function make_parser( options ) {
     "use strict";
@@ -48,7 +49,8 @@ function make_parser( options ) {
         'and': '&&',
         'not': '!'
     };
-
+    
+    var whitespace = [];
     var lex = null;
     var scope;
     var symbol_table = {};
@@ -216,11 +218,8 @@ function make_parser( options ) {
         
         // create an object from the type defined in the symbol table.
         token = Object.create(o);
-        token.line  = t.line;
-        token.from  = t.from;
-        token.to    = t.to;
-        token.colFrom = t.colFrom;
-        token.colTo = t.colTo;
+        token.range = clone( t.range );
+        token.loc = clone( t.loc );
         token.value = v;
         token.arity = a;
                 
@@ -248,7 +247,7 @@ function make_parser( options ) {
     };
 
     var statement = function () {
-        var n = token, v;
+        var n = token, v, eosTok;
         
         // try to match labels...
         if( n.arity === 'name' ) { 
@@ -269,8 +268,16 @@ function make_parser( options ) {
                 }
                 else if( token.id === '(nl)' ) { 
                     // a variable type is allowed to be alone on a line --- essentially a noop.
+                    eosTok = token;
                     eos();
-                    return [];
+                    
+                    return { 
+                        type: "ExpressionStatement",
+                        range: [ n.range[0], eosTok.range[1] ],
+                        expression: n,
+                        eos: eosTok,
+                        arity: "statement"
+                    };
                 }
             }
             
@@ -278,16 +285,31 @@ function make_parser( options ) {
             reverse();
         }
         
+        // if our token has a std function it is one of our statements.
         if (n.std) {
             advance();
             return n.std();
         }
 
-        // try expression-statement
-        v = expression(0);
+        // anything else will be a statement expression
+        return statementExpression();
+    };
+    
+    var statementExpression = function( ) {
+        var v = expression(0);
+        
+        var eosTok = token;
         eos();
         
-        return v;
+        // if it's an expression statement, wrap it in an EpressionStatement.
+        return { 
+            type: "ExpressionStatement",
+            range: [ v.range[0], eosTok.range[1] ],
+            loc: [ v.loc.start, eosTok.loc.end ],
+            expression: v,
+            eos: eosTok,
+            arity: "statement"
+        };    
     };
 
     var statements = function () {
@@ -301,7 +323,12 @@ function make_parser( options ) {
                 a.push(s);
             }
         }
-        return a.length === 0 ? null : a.length === 1 ? a[0] : a;
+        
+        if( a.length === 0 ) { 
+            return null;
+        }
+
+        return a;
     };
 
     var original_symbol = {
@@ -333,7 +360,21 @@ function make_parser( options ) {
         }
         return s;
     };
+    
+    var getLocStart = function( ref ) {
+        if( ref && ref.loc ) {
+            return ref.loc.start;
+        }
+        return null;
+    };
 
+    var getLocEnd = function( ref ) {
+        if( ref && ref.loc ) {
+            return ref.loc.end;
+        }
+        return null;
+    };
+    
     var constant = function (s, v) {
         var x = symbol(s);
         x.nud = function () {
@@ -345,13 +386,19 @@ function make_parser( options ) {
         x.value = v;
         return x;
     };
-
+    
     var infix = function (id, bp, led) {
         var s = symbol(id, bp);
         s.led = led || function (left) {
-            this.first = left;
-            this.second = expression(bp);
+        
+            this.left = left;
+            this.right = expression(bp);
             this.arity = "binary";
+            this.type = operatorType[id] || "BinaryExpression";
+            
+            this.range = [ this.left.range[0], this.right.range[1] ];
+            this.loc = { start: getLocStart( this.left ), end: getLocEnd( this.right ) };
+            
             return this;
         };
         return s;
@@ -360,9 +407,15 @@ function make_parser( options ) {
     var infixr = function (id, bp, led) {
         var s = symbol(id, bp);
         s.led = led || function (left) {
-            this.first = left;
-            this.second = expression(bp - 1);
+        
+            this.left = left;
+            this.right = expression(bp - 1);
             this.arity = "binary";
+            this.type = operatorType[id] || "BinaryExpression";
+            
+            this.range = [ this.left.range[0], this.right.range[1] ];
+            this.loc = { start:  getLocStart( this.left ), end: getLocEnd( this.right ) };
+
             return this;
         };
         return s;
@@ -373,10 +426,17 @@ function make_parser( options ) {
             if (left.id !== "." && left.id !== "[" && left.id !== '$' && left.id !== '$$' && left.arity !== "name" ) {
                 token_error( left,"Bad lvalue.");
             }
-            this.first = left;
-            this.second = expression(9);
+            this.left = left;
+            this.right = expression(9);
             this.assignment = true;
             this.arity = "binary";
+
+            this.type = "AssignmentExpression";
+            this.operator = this.id;
+            
+            this.range = [ this.left.range[0], this.right.range[1] ];
+            this.loc = { start:  getLocStart( this.left ), end: getLocEnd( this.right ) };
+            
             return this;
         });
     };
@@ -385,8 +445,14 @@ function make_parser( options ) {
         var s = symbol(id);
         s.nud = nud || function () {
             scope.reserve(this);
-            this.first = expression(70);
+            this.argument = expression(70);
             this.arity = "unary";
+            this.type = operatorType[id] || "UnaryExpression";
+            this.operator = this.id;
+            this.prefix = true;
+            this.range = [ this.range[0], this.argument.range[1] ];
+            this.loc = { start:  getLocStart( this ), end: getLocEnd( this.argument ) };
+
             return this;
         };
         return s;
@@ -396,8 +462,13 @@ function make_parser( options ) {
         var s = symbol(id);
         s.nud = nud || function () {
             scope.reserve(this);
-            this.first = expression(90);
+            this.argument = expression(90);
             this.arity = "unary";
+            this.type = operatorType[id] || "UnaryExpression";
+            this.operator = this.id;
+            this.range = [ this.range[0], this.argument.range[1] ];
+            this.loc = { start: getLocStart( this ), end: getLocEnd( this.argument ) };
+            
             return this;
         };
         return s;
@@ -471,6 +542,9 @@ function make_parser( options ) {
         advance(":");
         this.third = expression(0);
         this.arity = "ternary";
+        
+        this.range = [ this.first.range[0], this.third.range[1] ];
+        this.loc = { start:  getLocStart( this.first ), end: getLocEnd( this.third ) };
         return this;
     });
 
@@ -504,80 +578,114 @@ function make_parser( options ) {
     infix("/", 60);
     infix("%", 60);
 
+    var operatorType = {
+        '||': 'LogicalExpression',
+        '&&': 'LogicalExpression',
+        '^^': 'LogicalExpression',
+        '==': 'LogicalExpression'    
+    };
+    
     prefix_infix( ".", 80, function (left) {
         // infix version.
-        this.first = left;
+        this.object = left;
         if (token.id == '(' ) {
             advance( '(' );
-            this.second = expression( 10 );
+            this.property = expression( 10 );
+            this.computed = true;
+            
+            var end = token;
             advance( ')' );
+
+            this.range = [ this.object.range[0], end.range[1] ];
+            this.loc = { start:  getLocStart( this.object ), end: getLocEnd( end ) };
         }
         else { 
             token.arity = "literal";
-            this.second = token;
+            this.property = token;
+            this.computed = false;
             advance();
-        }   
 
+            this.range = [ this.object.range[0], this.property.range[1] ];
+            this.loc = { start:  getLocStart( this.object ), end: getLocEnd( this.property ) };
+        }   
+        
+        this.type = "MemberExpression";
         this.arity = "binary";
         return this;
     } );
 
     prefix_infix( "[", 80, function () {
-            var name = "";
+            var name = "", start = token;
             
             while( token.id === '.' || token.arity === 'name' ) { 
                 name += token.value;
                 advance();
             }
-                  
+            
+            var end = token;
             advance("]");
             
             this.first = name;
             this.id = "xlate";
             this.arity = "unary";
+            this.type = "XLateExpression";
+            this.range = [ start.range[0], end.range[1] ];
+            this.loc = { start:  getLocStart( start ), end: getLocEnd( end ) };
+            
             return this;
         }, 
         function (left) {
-            var range;
-            this.first = left;
+            
+            // first should resolve to some object.
+            this.object = left;
+
+            var range = clone( this );
 
             if( token.id === ':' ) { 
-                range = token;
-                range.id = ":";
-                range.arity = "binary";
+                // range specifier with empty start index.
+
+                this.fromIndex = null;
+                this.toIndex = null;
+                this.type = "RangeExpression";
                 
                 advance( ":" );
-
-                this.second = range;
                 
                 if( token.id !== "]" ) { 
-                    range.second = expression( 0 );
+                    this.toIndex = expression( 0 );
                 }
             }
             else {
+                // range/index specifier.
                 var e = expression(0);
                 
                 if( token.id === ":" ) { 
-                    range = token;
-                    range.id = ":";
-                    range.arity = "binary";
+                    // range specifier
+                    this.fromIndex = e;
+                    this.toIndex = null;
+                    this.type = "RangeExpression";
                     
                     advance( ":" );
-                    
-                    range.first = e;
-                    this.second = range;
-                    
+                                        
                     if( token.id !== "]" ) { 
-                        range.second = expression( 0 );
+                        this.toIndex = expression( 0 );
                     }
+
+                    this.type = "RangeExpression";                    
                 }
                 else {
-                    this.second = e;
+                    // index specifier.
+                    this.index = e;
+                    this.type = "IndexExpression";
                 }
             }
 
             this.arity = "binary";
+            var end = token;
             advance("]");
+            
+            this.range = [ this.object.range[0], end.range[1] ];
+            this.loc = { start:  getLocStart( this.object ), end: getLocEnd( end ) };
+
             return this;
     });
 
@@ -586,13 +694,16 @@ function make_parser( options ) {
         if (left.id === "." || left.id === "[") {
             // function call on member or index
             this.arity = "binary";
-            this.first = left;
-            this.second = a;
+            this.callee = left;
+            this.arguments = a;
+            this.type = "CallExpression";
         } 
         else {
             this.arity = "binary";
-            this.first = left;
-            this.second = a;
+            this.callee = left;
+            this.arguments = a;
+            this.type = "CallExpression";
+            
             if ((left.arity !== "unary" || left.id !== "function") &&
                     left.arity !== "name" && left.id !== "(" &&
                     left.id !== "&&" && left.id !== "||" && left.id !== "?" && left.id !== '$' && left.id !== '$$' ) {
@@ -608,19 +719,18 @@ function make_parser( options ) {
                 advance(",");
             }
         }
+        
+        var end = token;
         advance(")");
+    
+        this.range = [ this.callee.range[0], end.range[1] ];
+        this.loc = { start: getLocStart( this.callee ), end: getLocEnd( end ) };        
+        
         return this;
     });
     
     prefixist("$$");
     prefixist("$");
-
-    /* prefix("not", function () {
-            this.first = expression(70);
-            this.arity = "unary";
-            this.id = "!";
-            return this;
-    } );*/
     
     prefix("!");
     prefix("-");
@@ -634,6 +744,11 @@ function make_parser( options ) {
             this.arity = "literal";
             this.value = "#" + token.value;
             this.id = "(literal)";
+            this.type = "ObjRefLiteral";
+            
+            this.range = [ this.range[0], token.range[1] ];
+            this.loc = { start: getLocStart( this ), end: getLocEnd( token ) };        
+            
             advance();
         }
         else { 
@@ -656,9 +771,16 @@ function make_parser( options ) {
                 advance(",");
             }
         }
+        
+        var end = token;
         advance("}");
-        this.first = a;
+        
+        this.elements = a;
         this.arity = "unary";
+        this.type = "ListExpression";
+        this.range = [ this.range[0], end.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };        
+        
         return this;
     });
 
@@ -673,6 +795,7 @@ function make_parser( options ) {
         return this;
     } );
     
+    // pure grouping...
     prefix("(", function () {
         var e = expression(0);
         advance(")");
@@ -689,7 +812,7 @@ function make_parser( options ) {
         
         if ( token.arity === "name") {
             // either return type or name of function
-            tmpRtnType = token;
+            tmpRtnType = token.value;
             advance();
         }
         else {
@@ -699,7 +822,7 @@ function make_parser( options ) {
         if ( token.arity === "name" ) {
             // This is the function name.
             this.name = token.value;
-            this.returnType = tmpRtnType;
+            this.returnType = tmpRtnType.value;
             nameToken = token;
             advance();
         }
@@ -730,33 +853,33 @@ function make_parser( options ) {
                 
                 varType = token;
                 advance();
+
+                var param = {
+                    "dataType": null,
+                    "name": "", 
+                    "default": null
+                };
                 
                 if( token.arity === 'name' ) { 
-                    // variable name was supplied.
+                    // variable name/type was supplied.
                     varName = token;
-                    varName.dataType = varType;
+                    param.dataType = varType.value;
                     advance();
                 }
                 else {
                     // the varType was actually the name.
                     varName = varType;
-                    // varName.dataType = "dynamic";
                 }
  
                 scope.define(varName);
+                param.name = varName;
                 
                 if (token.id === "=") {
-                    t = token;
                     advance("=");
-                    t.first = varName;
-                    t.second = expression(0);
-                    t.arity = "binary";
+                    param["default"] = expression(0);
                 }
-                else {
-                    t = varName;
-                }
-
-                a.push(t);
+                
+                a.push(param);
                 
                 if (token.id !== ",") {
                     break;
@@ -764,17 +887,15 @@ function make_parser( options ) {
                 advance(",");
             }
         }
-        this.first = a;
+        this.params = a;
         advance(")");
 
-        // keep a reference to the first token (end of statement character)
-        this.start = token;
         eos();
 
         this.body = statements();
 
         // keep a reference to the last token
-        this.end = token;
+        var end = token;
         advance("end");
 
         this.arity = "function";
@@ -783,30 +904,44 @@ function make_parser( options ) {
         this.eos = token;
         eos();
         
+        this.range = [ this.range[0], end.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };        
+        this.type = "FunctionDeclaration";
+        
         return this;
     });
 
     function declaration( varType ) { 
         var a = [], n, t;
         
+        var declarator = {
+            type: "VariableDeclaration",
+            declarations: a
+        };
+        
         while (true) {
+            // n is name of variable.
             n = token;
             if (n.arity !== "name") {
                 token_error( n,"Expected a new variable name.");
             }
+            
+            t = {
+                type: "VariableDeclarator",
+                name: n,
+                init: null,
+                dataType: varType
+            };
+            
             scope.define(n);
             advance();
+            
             if (token.id === "=") {
-                t = token;
+                // declaration with assignment.
                 advance("=");
-                t.first = n;
-                t.second = expression(0);
-                t.arity = "binary";
+                t.init = expression(0);
             }
-            else {
-                t = n;
-            }
-            t.dataType = varType;
+
             a.push( t );
             
             if (token.id !== ",") {
@@ -815,8 +950,13 @@ function make_parser( options ) {
             advance(",");
         }
         
+        var eosToken = token;
         eos();
-        return a.length === 0 ? null : a.length === 1 ? a[0] : a;                
+        
+        declarator.range = [ varType.range[0], eosToken.range[0] ];
+        declarator.loc = { start: getLocStart( varType ), end: getLocStart( eosToken ) };
+        
+        return declarator;          
     }
     
     builtinTypes.forEach( function( varType ) { 
@@ -824,28 +964,41 @@ function make_parser( options ) {
     } );
 
     var ifElseIf = function() {
-        this.first = expression(0);
+        this.type = "IfStatement";
+        
+        this.test = expression(0);
         eos();
         
-        this.body = statements();
+        this.consequent = statements();
         skip_newlines();
       
         if ( token.id === "elseif" ) {
-            this.altBody = statement();
             
-            // final 'end' will be matched by original if.
+            // The alternate will be an elseif statement.
+            this.alternate = statement();
+            
             this.arity = "statement";
+            this.range = [ this.range[0], this.alternate.range[1] ];
+            this.loc = { start: getLocStart( this ), end: getLocEnd( this.alternate ) };
+            
+            // final 'end' has already been matched by the elseif.
             return this;
         }
         else if (token.id === "else") {
             advance("else");
             eos();
-            this.altBody = statements();
+
+            // the alternate is an array of zero or more statements.
+            this.alternate = statements();
         } 
         
+        var end = token;
         advance( "end" );
         this.eos = token;
         eos();
+        
+        this.range = [ this.range[0], end.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };
         
         this.arity = "statement";
         return this;
@@ -856,10 +1009,9 @@ function make_parser( options ) {
 
     stmt("return", function () {
         if( token.id !== "(nl)" ) {
-            this.first = expression(0);
+            this.argument = expression(0);
         } 
         
-        this.eos = token;
         eos();
         
         if ( token.id !== "end" && token.id !== 'elseif' && token.id !== 'else' && token.id !== '(end)' ) {
@@ -867,6 +1019,10 @@ function make_parser( options ) {
                 token_error( token, "Unreachable statement.");
             }
         }
+        
+        this.range = [ this.range[0], this.argument ? this.argument.range[1] : this.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( this.argument || this ) };
+        this.type = "ReturnStatement";
         this.arity = "statement";
         return this;
     });
@@ -880,6 +1036,8 @@ function make_parser( options ) {
             }
         }
         this.arity = "statement";
+        this.type = "BreakStatement";
+
         return this;
     });
 
@@ -889,6 +1047,10 @@ function make_parser( options ) {
         eos();
         
         this.arity = "statement";
+        this.range = [ this.range[0], this.first.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( this.first ) };
+        this.type = "BreakIfStatement";
+
         return this;
     });
 
@@ -902,6 +1064,7 @@ function make_parser( options ) {
         }
 
         this.arity = "statement";
+        this.type = "ContinueStatement";
         return this;
     });
 
@@ -911,22 +1074,31 @@ function make_parser( options ) {
         eos();
         
         this.arity = "statement";
+        this.range = [ this.range[0], this.first.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( this.first ) };
+        this.type = "ContinueIfStatement";
+
         return this;
     });
 
     stmt("while", function () {
         
         this.first = expression(0);
-        this.eos = token;
         eos();
         
         this.body = statements();
+
+        var end = token;
         advance("end");
         
         this.eos = token;
         eos();
         
         this.arity = "statement";
+
+        this.range = [ this.range[0], end.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };
+        this.type = "WhileStatement";
         
         return this;
     });
@@ -944,6 +1116,10 @@ function make_parser( options ) {
         eos();
         
         this.arity = "statement";
+        this.range = [ this.range[0], this.second.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( this.second ) };
+        this.type = "RepeatStatement";
+
         return this;
     });
     
@@ -967,6 +1143,7 @@ function make_parser( options ) {
             this.body = statements();
 
             this.id = "for_c";
+            this.type = "ForCStyleStatement";            
         }
         else if( token.arity === "name" ) { 
             // for "x in" or for "x = 1 ..."            
@@ -988,6 +1165,7 @@ function make_parser( options ) {
                 
                 this.body = statements();                
                 this.id = "for";
+                this.type = "ForStatement";            
             }
             else if( token.id === "in" ) { 
                 reverse();
@@ -996,6 +1174,7 @@ function make_parser( options ) {
                 
                 this.body = statements();
                 this.id = "for_in";
+                this.type = "ForInStatement";            
             }
             else {
                 token_error( token, "Unexpected token.  Expected 'in' or '='." );
@@ -1005,61 +1184,78 @@ function make_parser( options ) {
             token_error( token, "Unexpected token. Expected '(' or a variable name." );
         }
         
+        var end = token;
         advance( "end" );
         this.eos = token;
         eos();
         this.arity = "statement";
+
+        this.range = [ this.range[0], end.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };
+
         return this;
     } );
 
     stmt("switch", function() {
-        this.first = expression(0);
+        this.discriminant = expression(0);
         eos();
 
-        var c, e, s;        
-        this.second = [];
+        var c, e, s, end;        
+        this.cases = [];
         
         while( true ) { 
             if( token.id === "case" ) {
                 c = token;
-                c.first = [];
+                c.test = [];
                 advance( "case" );
 
                 // match 1 or more case values separated by commas.
                 while( true ) { 
                     e = expression(0);
-                    c.first.push( e );
+                    c.test.push( e );
                     if( token.id !== "," ) {
                         break;
                     }
                     advance( "," );
                 }
-                eos();
             }
             else if( token.id === "default" ){ 
                 c = token; 
-                c.first = "default";
+                c.test = null;
                 advance( "default" );
-                eos();
             }
             else break;
 
-            c.second = statements();
+            eos();
+
+            c.consequent = statements();
             c.arity = "binary";
-            this.second.push( c );
             
             // end of case or default
+            end = token;
             advance( "end" );
+            
+            c.type = "SwitchCase";
+            c.range = [ c.range[0], end.range[1] ];
+            c.loc = { start: getLocStart( c ), end: getLocEnd( end ) };
+            
+            this.cases.push( c );
+            
             eos();
         }
                 
         // end of switch
+        end = token;
         advance( "end" );
 
         this.eos = token;
         eos();
 
-        this.arity = "switch";
+        this.arity = "statement";
+        this.range = [ this.range[0], end.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };
+        this.type = "SwitchStatement";
+
         return this;
     });
 
@@ -1096,7 +1292,7 @@ function make_parser( options ) {
             while( ( t = lex.get() ) !== null ) { 
                 tokens.push( t );
             }
-            
+         
             // send through preprocessor...
             tokens = preprocessor.run( tokens );
             

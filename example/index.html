@@ -46,8 +46,12 @@
         vertical-align:top;
     }
     
-    .wrapNLBox > * {
+    .wrapNLBox * {
         vertical-align:top;
+    }
+    
+    .wrapNLBox span { 
+        margin-left:15px;
     }
         
     #tokenList {
@@ -136,7 +140,7 @@
         <div id="editor">function String foo( String arg1=&apos;23&apos; )&#13;&#09;String x = "This is editable"&#13;&#09;if x[:4] == "This" &amp;&amp; Str.CmpI( x[:4], "this" ) == 0&#13;&#09;&#09;Echo( "It worked" )&#13;&#09;&#09;return "a" + "b" + arg1&#13;&#09;end&#13;&#09;return x&#13;end</div>    
 
         <div class='box wrapNLBox'>
-            <span style='float:right'><input type='checkbox' id='wrapNL' checked> Wrap Newlines</span>
+            <span style='float:right'><span><input type='checkbox' id='indexBased' >Index-based Range</span><span><input type='checkbox' id='lineColBased'>Line/Column Based</span><span><input type='checkbox' id='wrapNL' checked>Wrap Newlines</span></span>
             <button id='instrument'>Add Profiler</button>
             <button id='codecoverage'>Add Code Coverage</button>
         </div>

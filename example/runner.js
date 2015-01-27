@@ -81,7 +81,22 @@ function go(source) {
         tree = parser.parse( source );
         endTime = performance.now();
 
-        msg = JSON.stringify( tree, [ 'arity',  'id', 'value', 'first', 'second', 'third', 'fourth', 'direction', 'label','declaration', "dataType", "name",  'body', 'altBody', "returnType", 'eos' ], 3 );
+        var validValues = [ "type", 'id', 'value', "default", "name", 'operator', 'left', 'right', 'argument', 'init', "test", 'first', 'second', 'third', 'fourth', 'direction', 'label', 'declaration', "dataType",  "kind", "returnType" ];
+        var groupValues = [ "params", "arguments", "body", "consequent", "alternate", "elements", "expression", "declarations", "declarations" ];
+        
+        validValues = validValues.concat( groupValues );
+        
+        var indexPosVals = [ "range" ];
+        var relativePosVals = [ "start", "end", "col", "line", "loc" ];
+        
+        if( $( '#lineColBased' ).prop( "checked" ) ) { 
+            validValues = validValues.concat( relativePosVals );
+        }        
+        if( $( '#indexBased' ).prop( "checked" ) ) { 
+            validValues = validValues.concat( indexPosVals );
+        }        
+        
+        msg = JSON.stringify( tree, validValues, 3 );
     } catch (e) {
         endTime = performance.now();
         msg = JSON.stringify( e );
@@ -149,6 +164,10 @@ $( function() {
         editor.focus();
     } );
     
+    $( '#indexBased' ).click( function() { 
+    
+    } );
+    
     $( '#instrument' ).click( function() { 
         doInstrument( editor );
     } );
@@ -157,7 +176,7 @@ $( function() {
         doCodeCoverage( editor );
     } );
     
-    $( '#wrapNL' ).click( doParse );
+    $( '#wrapNL,#indexBased,#lineColBased' ).click( doParse );
     
     var throttledParse = _.debounce( doParse, 1000 );
     editor.on( 'change', throttledParse );

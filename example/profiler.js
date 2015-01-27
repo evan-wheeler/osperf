@@ -82,7 +82,22 @@ function go(source) {
         tree = parser.parse( source );
         endTime = performance.now();
 
-        msg = JSON.stringify( tree, [ 'arity', 'value', 'left', 'right', 'first', 'second', 'third', 'fourth', 'body', 'altBody', 'direction', 'label', 'id', 'declaration', "dataType", "returnType", "name", 'eos' ], 3 );
+        var validValues = [ "type", 'id', 'value', "default", "name", 'operator', 'left', 'right', 'argument', 'init', "test", 'first', 'second', 'third', 'fourth', 'direction', 'label', 'declaration', "dataType",  "kind", "returnType" ];
+        var groupValues = [ "params", "arguments", "body", "consequent", "alternate", "elements", "expression", "declarations", "declarations" ];
+        
+        validValues = validValues.concat( groupValues );
+        
+        var indexPosVals = [ "range" ];
+        var relativePosVals = [ "start", "end", "col", "line", "loc" ];
+        
+        if( $( '#lineColBased' ).prop( "checked" ) ) { 
+            validValues = validValues.concat( relativePosVals );
+        }        
+        if( $( '#indexBased' ).prop( "checked" ) ) { 
+            validValues = validValues.concat( indexPosVals );
+        }        
+        
+        msg = JSON.stringify( tree, validValues, 3 );
     } catch (e) {
         endTime = performance.now();
         msg = JSON.stringify( e );
@@ -150,6 +165,10 @@ $( function() {
         editor.focus();
     } );
     
+    $( '#indexBased' ).click( function() { 
+    
+    } );
+    
     $( '#instrument' ).click( function() { 
         doInstrument( editor );
     } );
@@ -158,14 +177,1459 @@ $( function() {
         doCodeCoverage( editor );
     } );
     
-    $( '#wrapNL' ).click( doParse );
+    $( '#wrapNL,#indexBased,#lineColBased' ).click( doParse );
     
     var throttledParse = _.debounce( doParse, 1000 );
     editor.on( 'change', throttledParse );
     
     doParse();
 } );
-},{"../src/coverage":4,"../src/instrument":7,"../src/lexer":8,"../src/parser":10,"lodash":2}],2:[function(require,module,exports){
+},{"../src/coverage":9,"../src/instrument":12,"../src/lexer":13,"../src/parser":15,"lodash":7}],2:[function(require,module,exports){
+(function (Buffer){
+'use strict';
+
+function objectToString(o) {
+  return Object.prototype.toString.call(o);
+}
+
+// shim for Node's 'util' package
+// DO NOT REMOVE THIS! It is required for compatibility with EnderJS (http://enderjs.com/).
+var util = {
+  isArray: function (ar) {
+    return Array.isArray(ar) || (typeof ar === 'object' && objectToString(ar) === '[object Array]');
+  },
+  isDate: function (d) {
+    return typeof d === 'object' && objectToString(d) === '[object Date]';
+  },
+  isRegExp: function (re) {
+    return typeof re === 'object' && objectToString(re) === '[object RegExp]';
+  },
+  getRegExpFlags: function (re) {
+    var flags = '';
+    re.global && (flags += 'g');
+    re.ignoreCase && (flags += 'i');
+    re.multiline && (flags += 'm');
+    return flags;
+  }
+};
+
+
+if (typeof module === 'object')
+  module.exports = clone;
+
+/**
+ * Clones (copies) an Object using deep copying.
+ *
+ * This function supports circular references by default, but if you are certain
+ * there are no circular references in your object, you can save some CPU time
+ * by calling clone(obj, false).
+ *
+ * Caution: if `circular` is false and `parent` contains circular references,
+ * your program may enter an infinite loop and crash.
+ *
+ * @param `parent` - the object to be cloned
+ * @param `circular` - set to true if the object to be cloned may contain
+ *    circular references. (optional - true by default)
+ * @param `depth` - set to a number if the object is only to be cloned to
+ *    a particular depth. (optional - defaults to Infinity)
+ * @param `prototype` - sets the prototype to be used when cloning an object.
+ *    (optional - defaults to parent prototype).
+*/
+
+function clone(parent, circular, depth, prototype) {
+  // maintain two arrays for circular references, where corresponding parents
+  // and children have the same index
+  var allParents = [];
+  var allChildren = [];
+
+  var useBuffer = typeof Buffer != 'undefined';
+
+  if (typeof circular == 'undefined')
+    circular = true;
+
+  if (typeof depth == 'undefined')
+    depth = Infinity;
+
+  // recurse this function so we don't reset allParents and allChildren
+  function _clone(parent, depth) {
+    // cloning null always returns null
+    if (parent === null)
+      return null;
+
+    if (depth == 0)
+      return parent;
+
+    var child;
+    var proto;
+    if (typeof parent != 'object') {
+      return parent;
+    }
+
+    if (util.isArray(parent)) {
+      child = [];
+    } else if (util.isRegExp(parent)) {
+      child = new RegExp(parent.source, util.getRegExpFlags(parent));
+      if (parent.lastIndex) child.lastIndex = parent.lastIndex;
+    } else if (util.isDate(parent)) {
+      child = new Date(parent.getTime());
+    } else if (useBuffer && Buffer.isBuffer(parent)) {
+      child = new Buffer(parent.length);
+      parent.copy(child);
+      return child;
+    } else {
+      if (typeof prototype == 'undefined') {
+        proto = Object.getPrototypeOf(parent);
+        child = Object.create(proto);
+      }
+      else {
+        child = Object.create(prototype);
+        proto = prototype;
+      }
+    }
+
+    if (circular) {
+      var index = allParents.indexOf(parent);
+
+      if (index != -1) {
+        return allChildren[index];
+      }
+      allParents.push(parent);
+      allChildren.push(child);
+    }
+
+    for (var i in parent) {
+      var attrs;
+      if (proto) {
+        attrs = Object.getOwnPropertyDescriptor(proto, i);
+      }
+      
+      if (attrs && attrs.set == null) {
+        continue;
+      }
+      child[i] = _clone(parent[i], depth - 1);
+    }
+
+    return child;
+  }
+
+  return _clone(parent, depth);
+}
+
+/**
+ * Simple flat clone using prototype, accepts only objects, usefull for property
+ * override on FLAT configuration object (no nested props).
+ *
+ * USE WITH CAUTION! This may not behave as you wish if you do not know how this
+ * works.
+ */
+clone.clonePrototype = function(parent) {
+  if (parent === null)
+    return null;
+
+  var c = function () {};
+  c.prototype = parent;
+  return new c();
+};
+
+}).call(this,require("buffer").Buffer)
+},{"buffer":3}],3:[function(require,module,exports){
+/*!
+ * The buffer module from node.js, for the browser.
+ *
+ * @author   Feross Aboukhadijeh <feross@feross.org> <http://feross.org>
+ * @license  MIT
+ */
+
+var base64 = require('base64-js')
+var ieee754 = require('ieee754')
+var isArray = require('is-array')
+
+exports.Buffer = Buffer
+exports.SlowBuffer = Buffer
+exports.INSPECT_MAX_BYTES = 50
+Buffer.poolSize = 8192 // not used by this implementation
+
+var kMaxLength = 0x3fffffff
+
+/**
+ * If `Buffer.TYPED_ARRAY_SUPPORT`:
+ *   === true    Use Uint8Array implementation (fastest)
+ *   === false   Use Object implementation (most compatible, even IE6)
+ *
+ * Browsers that support typed arrays are IE 10+, Firefox 4+, Chrome 7+, Safari 5.1+,
+ * Opera 11.6+, iOS 4.2+.
+ *
+ * Note:
+ *
+ * - Implementation must support adding new properties to `Uint8Array` instances.
+ *   Firefox 4-29 lacked support, fixed in Firefox 30+.
+ *   See: https://bugzilla.mozilla.org/show_bug.cgi?id=695438.
+ *
+ *  - Chrome 9-10 is missing the `TypedArray.prototype.subarray` function.
+ *
+ *  - IE10 has a broken `TypedArray.prototype.subarray` function which returns arrays of
+ *    incorrect length in some situations.
+ *
+ * We detect these buggy browsers and set `Buffer.TYPED_ARRAY_SUPPORT` to `false` so they will
+ * get the Object implementation, which is slower but will work correctly.
+ */
+Buffer.TYPED_ARRAY_SUPPORT = (function () {
+  try {
+    var buf = new ArrayBuffer(0)
+    var arr = new Uint8Array(buf)
+    arr.foo = function () { return 42 }
+    return 42 === arr.foo() && // typed array instances can be augmented
+        typeof arr.subarray === 'function' && // chrome 9-10 lack `subarray`
+        new Uint8Array(1).subarray(1, 1).byteLength === 0 // ie10 has broken `subarray`
+  } catch (e) {
+    return false
+  }
+})()
+
+/**
+ * Class: Buffer
+ * =============
+ *
+ * The Buffer constructor returns instances of `Uint8Array` that are augmented
+ * with function properties for all the node `Buffer` API functions. We use
+ * `Uint8Array` so that square bracket notation works as expected -- it returns
+ * a single octet.
+ *
+ * By augmenting the instances, we can avoid modifying the `Uint8Array`
+ * prototype.
+ */
+function Buffer (subject, encoding, noZero) {
+  if (!(this instanceof Buffer))
+    return new Buffer(subject, encoding, noZero)
+
+  var type = typeof subject
+
+  // Find the length
+  var length
+  if (type === 'number')
+    length = subject > 0 ? subject >>> 0 : 0
+  else if (type === 'string') {
+    if (encoding === 'base64')
+      subject = base64clean(subject)
+    length = Buffer.byteLength(subject, encoding)
+  } else if (type === 'object' && subject !== null) { // assume object is array-like
+    if (subject.type === 'Buffer' && isArray(subject.data))
+      subject = subject.data
+    length = +subject.length > 0 ? Math.floor(+subject.length) : 0
+  } else
+    throw new TypeError('must start with number, buffer, array or string')
+
+  if (this.length > kMaxLength)
+    throw new RangeError('Attempt to allocate Buffer larger than maximum ' +
+      'size: 0x' + kMaxLength.toString(16) + ' bytes')
+
+  var buf
+  if (Buffer.TYPED_ARRAY_SUPPORT) {
+    // Preferred: Return an augmented `Uint8Array` instance for best performance
+    buf = Buffer._augment(new Uint8Array(length))
+  } else {
+    // Fallback: Return THIS instance of Buffer (created by `new`)
+    buf = this
+    buf.length = length
+    buf._isBuffer = true
+  }
+
+  var i
+  if (Buffer.TYPED_ARRAY_SUPPORT && typeof subject.byteLength === 'number') {
+    // Speed optimization -- use set if we're copying from a typed array
+    buf._set(subject)
+  } else if (isArrayish(subject)) {
+    // Treat array-ish objects as a byte array
+    if (Buffer.isBuffer(subject)) {
+      for (i = 0; i < length; i++)
+        buf[i] = subject.readUInt8(i)
+    } else {
+      for (i = 0; i < length; i++)
+        buf[i] = ((subject[i] % 256) + 256) % 256
+    }
+  } else if (type === 'string') {
+    buf.write(subject, 0, encoding)
+  } else if (type === 'number' && !Buffer.TYPED_ARRAY_SUPPORT && !noZero) {
+    for (i = 0; i < length; i++) {
+      buf[i] = 0
+    }
+  }
+
+  return buf
+}
+
+Buffer.isBuffer = function (b) {
+  return !!(b != null && b._isBuffer)
+}
+
+Buffer.compare = function (a, b) {
+  if (!Buffer.isBuffer(a) || !Buffer.isBuffer(b))
+    throw new TypeError('Arguments must be Buffers')
+
+  var x = a.length
+  var y = b.length
+  for (var i = 0, len = Math.min(x, y); i < len && a[i] === b[i]; i++) {}
+  if (i !== len) {
+    x = a[i]
+    y = b[i]
+  }
+  if (x < y) return -1
+  if (y < x) return 1
+  return 0
+}
+
+Buffer.isEncoding = function (encoding) {
+  switch (String(encoding).toLowerCase()) {
+    case 'hex':
+    case 'utf8':
+    case 'utf-8':
+    case 'ascii':
+    case 'binary':
+    case 'base64':
+    case 'raw':
+    case 'ucs2':
+    case 'ucs-2':
+    case 'utf16le':
+    case 'utf-16le':
+      return true
+    default:
+      return false
+  }
+}
+
+Buffer.concat = function (list, totalLength) {
+  if (!isArray(list)) throw new TypeError('Usage: Buffer.concat(list[, length])')
+
+  if (list.length === 0) {
+    return new Buffer(0)
+  } else if (list.length === 1) {
+    return list[0]
+  }
+
+  var i
+  if (totalLength === undefined) {
+    totalLength = 0
+    for (i = 0; i < list.length; i++) {
+      totalLength += list[i].length
+    }
+  }
+
+  var buf = new Buffer(totalLength)
+  var pos = 0
+  for (i = 0; i < list.length; i++) {
+    var item = list[i]
+    item.copy(buf, pos)
+    pos += item.length
+  }
+  return buf
+}
+
+Buffer.byteLength = function (str, encoding) {
+  var ret
+  str = str + ''
+  switch (encoding || 'utf8') {
+    case 'ascii':
+    case 'binary':
+    case 'raw':
+      ret = str.length
+      break
+    case 'ucs2':
+    case 'ucs-2':
+    case 'utf16le':
+    case 'utf-16le':
+      ret = str.length * 2
+      break
+    case 'hex':
+      ret = str.length >>> 1
+      break
+    case 'utf8':
+    case 'utf-8':
+      ret = utf8ToBytes(str).length
+      break
+    case 'base64':
+      ret = base64ToBytes(str).length
+      break
+    default:
+      ret = str.length
+  }
+  return ret
+}
+
+// pre-set for values that may exist in the future
+Buffer.prototype.length = undefined
+Buffer.prototype.parent = undefined
+
+// toString(encoding, start=0, end=buffer.length)
+Buffer.prototype.toString = function (encoding, start, end) {
+  var loweredCase = false
+
+  start = start >>> 0
+  end = end === undefined || end === Infinity ? this.length : end >>> 0
+
+  if (!encoding) encoding = 'utf8'
+  if (start < 0) start = 0
+  if (end > this.length) end = this.length
+  if (end <= start) return ''
+
+  while (true) {
+    switch (encoding) {
+      case 'hex':
+        return hexSlice(this, start, end)
+
+      case 'utf8':
+      case 'utf-8':
+        return utf8Slice(this, start, end)
+
+      case 'ascii':
+        return asciiSlice(this, start, end)
+
+      case 'binary':
+        return binarySlice(this, start, end)
+
+      case 'base64':
+        return base64Slice(this, start, end)
+
+      case 'ucs2':
+      case 'ucs-2':
+      case 'utf16le':
+      case 'utf-16le':
+        return utf16leSlice(this, start, end)
+
+      default:
+        if (loweredCase)
+          throw new TypeError('Unknown encoding: ' + encoding)
+        encoding = (encoding + '').toLowerCase()
+        loweredCase = true
+    }
+  }
+}
+
+Buffer.prototype.equals = function (b) {
+  if(!Buffer.isBuffer(b)) throw new TypeError('Argument must be a Buffer')
+  return Buffer.compare(this, b) === 0
+}
+
+Buffer.prototype.inspect = function () {
+  var str = ''
+  var max = exports.INSPECT_MAX_BYTES
+  if (this.length > 0) {
+    str = this.toString('hex', 0, max).match(/.{2}/g).join(' ')
+    if (this.length > max)
+      str += ' ... '
+  }
+  return '<Buffer ' + str + '>'
+}
+
+Buffer.prototype.compare = function (b) {
+  if (!Buffer.isBuffer(b)) throw new TypeError('Argument must be a Buffer')
+  return Buffer.compare(this, b)
+}
+
+// `get` will be removed in Node 0.13+
+Buffer.prototype.get = function (offset) {
+  console.log('.get() is deprecated. Access using array indexes instead.')
+  return this.readUInt8(offset)
+}
+
+// `set` will be removed in Node 0.13+
+Buffer.prototype.set = function (v, offset) {
+  console.log('.set() is deprecated. Access using array indexes instead.')
+  return this.writeUInt8(v, offset)
+}
+
+function hexWrite (buf, string, offset, length) {
+  offset = Number(offset) || 0
+  var remaining = buf.length - offset
+  if (!length) {
+    length = remaining
+  } else {
+    length = Number(length)
+    if (length > remaining) {
+      length = remaining
+    }
+  }
+
+  // must be an even number of digits
+  var strLen = string.length
+  if (strLen % 2 !== 0) throw new Error('Invalid hex string')
+
+  if (length > strLen / 2) {
+    length = strLen / 2
+  }
+  for (var i = 0; i < length; i++) {
+    var byte = parseInt(string.substr(i * 2, 2), 16)
+    if (isNaN(byte)) throw new Error('Invalid hex string')
+    buf[offset + i] = byte
+  }
+  return i
+}
+
+function utf8Write (buf, string, offset, length) {
+  var charsWritten = blitBuffer(utf8ToBytes(string), buf, offset, length)
+  return charsWritten
+}
+
+function asciiWrite (buf, string, offset, length) {
+  var charsWritten = blitBuffer(asciiToBytes(string), buf, offset, length)
+  return charsWritten
+}
+
+function binaryWrite (buf, string, offset, length) {
+  return asciiWrite(buf, string, offset, length)
+}
+
+function base64Write (buf, string, offset, length) {
+  var charsWritten = blitBuffer(base64ToBytes(string), buf, offset, length)
+  return charsWritten
+}
+
+function utf16leWrite (buf, string, offset, length) {
+  var charsWritten = blitBuffer(utf16leToBytes(string), buf, offset, length, 2)
+  return charsWritten
+}
+
+Buffer.prototype.write = function (string, offset, length, encoding) {
+  // Support both (string, offset, length, encoding)
+  // and the legacy (string, encoding, offset, length)
+  if (isFinite(offset)) {
+    if (!isFinite(length)) {
+      encoding = length
+      length = undefined
+    }
+  } else {  // legacy
+    var swap = encoding
+    encoding = offset
+    offset = length
+    length = swap
+  }
+
+  offset = Number(offset) || 0
+  var remaining = this.length - offset
+  if (!length) {
+    length = remaining
+  } else {
+    length = Number(length)
+    if (length > remaining) {
+      length = remaining
+    }
+  }
+  encoding = String(encoding || 'utf8').toLowerCase()
+
+  var ret
+  switch (encoding) {
+    case 'hex':
+      ret = hexWrite(this, string, offset, length)
+      break
+    case 'utf8':
+    case 'utf-8':
+      ret = utf8Write(this, string, offset, length)
+      break
+    case 'ascii':
+      ret = asciiWrite(this, string, offset, length)
+      break
+    case 'binary':
+      ret = binaryWrite(this, string, offset, length)
+      break
+    case 'base64':
+      ret = base64Write(this, string, offset, length)
+      break
+    case 'ucs2':
+    case 'ucs-2':
+    case 'utf16le':
+    case 'utf-16le':
+      ret = utf16leWrite(this, string, offset, length)
+      break
+    default:
+      throw new TypeError('Unknown encoding: ' + encoding)
+  }
+  return ret
+}
+
+Buffer.prototype.toJSON = function () {
+  return {
+    type: 'Buffer',
+    data: Array.prototype.slice.call(this._arr || this, 0)
+  }
+}
+
+function base64Slice (buf, start, end) {
+  if (start === 0 && end === buf.length) {
+    return base64.fromByteArray(buf)
+  } else {
+    return base64.fromByteArray(buf.slice(start, end))
+  }
+}
+
+function utf8Slice (buf, start, end) {
+  var res = ''
+  var tmp = ''
+  end = Math.min(buf.length, end)
+
+  for (var i = start; i < end; i++) {
+    if (buf[i] <= 0x7F) {
+      res += decodeUtf8Char(tmp) + String.fromCharCode(buf[i])
+      tmp = ''
+    } else {
+      tmp += '%' + buf[i].toString(16)
+    }
+  }
+
+  return res + decodeUtf8Char(tmp)
+}
+
+function asciiSlice (buf, start, end) {
+  var ret = ''
+  end = Math.min(buf.length, end)
+
+  for (var i = start; i < end; i++) {
+    ret += String.fromCharCode(buf[i])
+  }
+  return ret
+}
+
+function binarySlice (buf, start, end) {
+  return asciiSlice(buf, start, end)
+}
+
+function hexSlice (buf, start, end) {
+  var len = buf.length
+
+  if (!start || start < 0) start = 0
+  if (!end || end < 0 || end > len) end = len
+
+  var out = ''
+  for (var i = start; i < end; i++) {
+    out += toHex(buf[i])
+  }
+  return out
+}
+
+function utf16leSlice (buf, start, end) {
+  var bytes = buf.slice(start, end)
+  var res = ''
+  for (var i = 0; i < bytes.length; i += 2) {
+    res += String.fromCharCode(bytes[i] + bytes[i + 1] * 256)
+  }
+  return res
+}
+
+Buffer.prototype.slice = function (start, end) {
+  var len = this.length
+  start = ~~start
+  end = end === undefined ? len : ~~end
+
+  if (start < 0) {
+    start += len;
+    if (start < 0)
+      start = 0
+  } else if (start > len) {
+    start = len
+  }
+
+  if (end < 0) {
+    end += len
+    if (end < 0)
+      end = 0
+  } else if (end > len) {
+    end = len
+  }
+
+  if (end < start)
+    end = start
+
+  if (Buffer.TYPED_ARRAY_SUPPORT) {
+    return Buffer._augment(this.subarray(start, end))
+  } else {
+    var sliceLen = end - start
+    var newBuf = new Buffer(sliceLen, undefined, true)
+    for (var i = 0; i < sliceLen; i++) {
+      newBuf[i] = this[i + start]
+    }
+    return newBuf
+  }
+}
+
+/*
+ * Need to make sure that buffer isn't trying to write out of bounds.
+ */
+function checkOffset (offset, ext, length) {
+  if ((offset % 1) !== 0 || offset < 0)
+    throw new RangeError('offset is not uint')
+  if (offset + ext > length)
+    throw new RangeError('Trying to access beyond buffer length')
+}
+
+Buffer.prototype.readUInt8 = function (offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 1, this.length)
+  return this[offset]
+}
+
+Buffer.prototype.readUInt16LE = function (offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 2, this.length)
+  return this[offset] | (this[offset + 1] << 8)
+}
+
+Buffer.prototype.readUInt16BE = function (offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 2, this.length)
+  return (this[offset] << 8) | this[offset + 1]
+}
+
+Buffer.prototype.readUInt32LE = function (offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 4, this.length)
+
+  return ((this[offset]) |
+      (this[offset + 1] << 8) |
+      (this[offset + 2] << 16)) +
+      (this[offset + 3] * 0x1000000)
+}
+
+Buffer.prototype.readUInt32BE = function (offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 4, this.length)
+
+  return (this[offset] * 0x1000000) +
+      ((this[offset + 1] << 16) |
+      (this[offset + 2] << 8) |
+      this[offset + 3])
+}
+
+Buffer.prototype.readInt8 = function (offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 1, this.length)
+  if (!(this[offset] & 0x80))
+    return (this[offset])
+  return ((0xff - this[offset] + 1) * -1)
+}
+
+Buffer.prototype.readInt16LE = function (offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 2, this.length)
+  var val = this[offset] | (this[offset + 1] << 8)
+  return (val & 0x8000) ? val | 0xFFFF0000 : val
+}
+
+Buffer.prototype.readInt16BE = function (offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 2, this.length)
+  var val = this[offset + 1] | (this[offset] << 8)
+  return (val & 0x8000) ? val | 0xFFFF0000 : val
+}
+
+Buffer.prototype.readInt32LE = function (offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 4, this.length)
+
+  return (this[offset]) |
+      (this[offset + 1] << 8) |
+      (this[offset + 2] << 16) |
+      (this[offset + 3] << 24)
+}
+
+Buffer.prototype.readInt32BE = function (offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 4, this.length)
+
+  return (this[offset] << 24) |
+      (this[offset + 1] << 16) |
+      (this[offset + 2] << 8) |
+      (this[offset + 3])
+}
+
+Buffer.prototype.readFloatLE = function (offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 4, this.length)
+  return ieee754.read(this, offset, true, 23, 4)
+}
+
+Buffer.prototype.readFloatBE = function (offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 4, this.length)
+  return ieee754.read(this, offset, false, 23, 4)
+}
+
+Buffer.prototype.readDoubleLE = function (offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 8, this.length)
+  return ieee754.read(this, offset, true, 52, 8)
+}
+
+Buffer.prototype.readDoubleBE = function (offset, noAssert) {
+  if (!noAssert)
+    checkOffset(offset, 8, this.length)
+  return ieee754.read(this, offset, false, 52, 8)
+}
+
+function checkInt (buf, value, offset, ext, max, min) {
+  if (!Buffer.isBuffer(buf)) throw new TypeError('buffer must be a Buffer instance')
+  if (value > max || value < min) throw new TypeError('value is out of bounds')
+  if (offset + ext > buf.length) throw new TypeError('index out of range')
+}
+
+Buffer.prototype.writeUInt8 = function (value, offset, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert)
+    checkInt(this, value, offset, 1, 0xff, 0)
+  if (!Buffer.TYPED_ARRAY_SUPPORT) value = Math.floor(value)
+  this[offset] = value
+  return offset + 1
+}
+
+function objectWriteUInt16 (buf, value, offset, littleEndian) {
+  if (value < 0) value = 0xffff + value + 1
+  for (var i = 0, j = Math.min(buf.length - offset, 2); i < j; i++) {
+    buf[offset + i] = (value & (0xff << (8 * (littleEndian ? i : 1 - i)))) >>>
+      (littleEndian ? i : 1 - i) * 8
+  }
+}
+
+Buffer.prototype.writeUInt16LE = function (value, offset, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert)
+    checkInt(this, value, offset, 2, 0xffff, 0)
+  if (Buffer.TYPED_ARRAY_SUPPORT) {
+    this[offset] = value
+    this[offset + 1] = (value >>> 8)
+  } else objectWriteUInt16(this, value, offset, true)
+  return offset + 2
+}
+
+Buffer.prototype.writeUInt16BE = function (value, offset, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert)
+    checkInt(this, value, offset, 2, 0xffff, 0)
+  if (Buffer.TYPED_ARRAY_SUPPORT) {
+    this[offset] = (value >>> 8)
+    this[offset + 1] = value
+  } else objectWriteUInt16(this, value, offset, false)
+  return offset + 2
+}
+
+function objectWriteUInt32 (buf, value, offset, littleEndian) {
+  if (value < 0) value = 0xffffffff + value + 1
+  for (var i = 0, j = Math.min(buf.length - offset, 4); i < j; i++) {
+    buf[offset + i] = (value >>> (littleEndian ? i : 3 - i) * 8) & 0xff
+  }
+}
+
+Buffer.prototype.writeUInt32LE = function (value, offset, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert)
+    checkInt(this, value, offset, 4, 0xffffffff, 0)
+  if (Buffer.TYPED_ARRAY_SUPPORT) {
+    this[offset + 3] = (value >>> 24)
+    this[offset + 2] = (value >>> 16)
+    this[offset + 1] = (value >>> 8)
+    this[offset] = value
+  } else objectWriteUInt32(this, value, offset, true)
+  return offset + 4
+}
+
+Buffer.prototype.writeUInt32BE = function (value, offset, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert)
+    checkInt(this, value, offset, 4, 0xffffffff, 0)
+  if (Buffer.TYPED_ARRAY_SUPPORT) {
+    this[offset] = (value >>> 24)
+    this[offset + 1] = (value >>> 16)
+    this[offset + 2] = (value >>> 8)
+    this[offset + 3] = value
+  } else objectWriteUInt32(this, value, offset, false)
+  return offset + 4
+}
+
+Buffer.prototype.writeInt8 = function (value, offset, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert)
+    checkInt(this, value, offset, 1, 0x7f, -0x80)
+  if (!Buffer.TYPED_ARRAY_SUPPORT) value = Math.floor(value)
+  if (value < 0) value = 0xff + value + 1
+  this[offset] = value
+  return offset + 1
+}
+
+Buffer.prototype.writeInt16LE = function (value, offset, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert)
+    checkInt(this, value, offset, 2, 0x7fff, -0x8000)
+  if (Buffer.TYPED_ARRAY_SUPPORT) {
+    this[offset] = value
+    this[offset + 1] = (value >>> 8)
+  } else objectWriteUInt16(this, value, offset, true)
+  return offset + 2
+}
+
+Buffer.prototype.writeInt16BE = function (value, offset, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert)
+    checkInt(this, value, offset, 2, 0x7fff, -0x8000)
+  if (Buffer.TYPED_ARRAY_SUPPORT) {
+    this[offset] = (value >>> 8)
+    this[offset + 1] = value
+  } else objectWriteUInt16(this, value, offset, false)
+  return offset + 2
+}
+
+Buffer.prototype.writeInt32LE = function (value, offset, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert)
+    checkInt(this, value, offset, 4, 0x7fffffff, -0x80000000)
+  if (Buffer.TYPED_ARRAY_SUPPORT) {
+    this[offset] = value
+    this[offset + 1] = (value >>> 8)
+    this[offset + 2] = (value >>> 16)
+    this[offset + 3] = (value >>> 24)
+  } else objectWriteUInt32(this, value, offset, true)
+  return offset + 4
+}
+
+Buffer.prototype.writeInt32BE = function (value, offset, noAssert) {
+  value = +value
+  offset = offset >>> 0
+  if (!noAssert)
+    checkInt(this, value, offset, 4, 0x7fffffff, -0x80000000)
+  if (value < 0) value = 0xffffffff + value + 1
+  if (Buffer.TYPED_ARRAY_SUPPORT) {
+    this[offset] = (value >>> 24)
+    this[offset + 1] = (value >>> 16)
+    this[offset + 2] = (value >>> 8)
+    this[offset + 3] = value
+  } else objectWriteUInt32(this, value, offset, false)
+  return offset + 4
+}
+
+function checkIEEE754 (buf, value, offset, ext, max, min) {
+  if (value > max || value < min) throw new TypeError('value is out of bounds')
+  if (offset + ext > buf.length) throw new TypeError('index out of range')
+}
+
+function writeFloat (buf, value, offset, littleEndian, noAssert) {
+  if (!noAssert)
+    checkIEEE754(buf, value, offset, 4, 3.4028234663852886e+38, -3.4028234663852886e+38)
+  ieee754.write(buf, value, offset, littleEndian, 23, 4)
+  return offset + 4
+}
+
+Buffer.prototype.writeFloatLE = function (value, offset, noAssert) {
+  return writeFloat(this, value, offset, true, noAssert)
+}
+
+Buffer.prototype.writeFloatBE = function (value, offset, noAssert) {
+  return writeFloat(this, value, offset, false, noAssert)
+}
+
+function writeDouble (buf, value, offset, littleEndian, noAssert) {
+  if (!noAssert)
+    checkIEEE754(buf, value, offset, 8, 1.7976931348623157E+308, -1.7976931348623157E+308)
+  ieee754.write(buf, value, offset, littleEndian, 52, 8)
+  return offset + 8
+}
+
+Buffer.prototype.writeDoubleLE = function (value, offset, noAssert) {
+  return writeDouble(this, value, offset, true, noAssert)
+}
+
+Buffer.prototype.writeDoubleBE = function (value, offset, noAssert) {
+  return writeDouble(this, value, offset, false, noAssert)
+}
+
+// copy(targetBuffer, targetStart=0, sourceStart=0, sourceEnd=buffer.length)
+Buffer.prototype.copy = function (target, target_start, start, end) {
+  var source = this
+
+  if (!start) start = 0
+  if (!end && end !== 0) end = this.length
+  if (!target_start) target_start = 0
+
+  // Copy 0 bytes; we're done
+  if (end === start) return
+  if (target.length === 0 || source.length === 0) return
+
+  // Fatal error conditions
+  if (end < start) throw new TypeError('sourceEnd < sourceStart')
+  if (target_start < 0 || target_start >= target.length)
+    throw new TypeError('targetStart out of bounds')
+  if (start < 0 || start >= source.length) throw new TypeError('sourceStart out of bounds')
+  if (end < 0 || end > source.length) throw new TypeError('sourceEnd out of bounds')
+
+  // Are we oob?
+  if (end > this.length)
+    end = this.length
+  if (target.length - target_start < end - start)
+    end = target.length - target_start + start
+
+  var len = end - start
+
+  if (len < 1000 || !Buffer.TYPED_ARRAY_SUPPORT) {
+    for (var i = 0; i < len; i++) {
+      target[i + target_start] = this[i + start]
+    }
+  } else {
+    target._set(this.subarray(start, start + len), target_start)
+  }
+}
+
+// fill(value, start=0, end=buffer.length)
+Buffer.prototype.fill = function (value, start, end) {
+  if (!value) value = 0
+  if (!start) start = 0
+  if (!end) end = this.length
+
+  if (end < start) throw new TypeError('end < start')
+
+  // Fill 0 bytes; we're done
+  if (end === start) return
+  if (this.length === 0) return
+
+  if (start < 0 || start >= this.length) throw new TypeError('start out of bounds')
+  if (end < 0 || end > this.length) throw new TypeError('end out of bounds')
+
+  var i
+  if (typeof value === 'number') {
+    for (i = start; i < end; i++) {
+      this[i] = value
+    }
+  } else {
+    var bytes = utf8ToBytes(value.toString())
+    var len = bytes.length
+    for (i = start; i < end; i++) {
+      this[i] = bytes[i % len]
+    }
+  }
+
+  return this
+}
+
+/**
+ * Creates a new `ArrayBuffer` with the *copied* memory of the buffer instance.
+ * Added in Node 0.12. Only available in browsers that support ArrayBuffer.
+ */
+Buffer.prototype.toArrayBuffer = function () {
+  if (typeof Uint8Array !== 'undefined') {
+    if (Buffer.TYPED_ARRAY_SUPPORT) {
+      return (new Buffer(this)).buffer
+    } else {
+      var buf = new Uint8Array(this.length)
+      for (var i = 0, len = buf.length; i < len; i += 1) {
+        buf[i] = this[i]
+      }
+      return buf.buffer
+    }
+  } else {
+    throw new TypeError('Buffer.toArrayBuffer not supported in this browser')
+  }
+}
+
+// HELPER FUNCTIONS
+// ================
+
+var BP = Buffer.prototype
+
+/**
+ * Augment a Uint8Array *instance* (not the Uint8Array class!) with Buffer methods
+ */
+Buffer._augment = function (arr) {
+  arr.constructor = Buffer
+  arr._isBuffer = true
+
+  // save reference to original Uint8Array get/set methods before overwriting
+  arr._get = arr.get
+  arr._set = arr.set
+
+  // deprecated, will be removed in node 0.13+
+  arr.get = BP.get
+  arr.set = BP.set
+
+  arr.write = BP.write
+  arr.toString = BP.toString
+  arr.toLocaleString = BP.toString
+  arr.toJSON = BP.toJSON
+  arr.equals = BP.equals
+  arr.compare = BP.compare
+  arr.copy = BP.copy
+  arr.slice = BP.slice
+  arr.readUInt8 = BP.readUInt8
+  arr.readUInt16LE = BP.readUInt16LE
+  arr.readUInt16BE = BP.readUInt16BE
+  arr.readUInt32LE = BP.readUInt32LE
+  arr.readUInt32BE = BP.readUInt32BE
+  arr.readInt8 = BP.readInt8
+  arr.readInt16LE = BP.readInt16LE
+  arr.readInt16BE = BP.readInt16BE
+  arr.readInt32LE = BP.readInt32LE
+  arr.readInt32BE = BP.readInt32BE
+  arr.readFloatLE = BP.readFloatLE
+  arr.readFloatBE = BP.readFloatBE
+  arr.readDoubleLE = BP.readDoubleLE
+  arr.readDoubleBE = BP.readDoubleBE
+  arr.writeUInt8 = BP.writeUInt8
+  arr.writeUInt16LE = BP.writeUInt16LE
+  arr.writeUInt16BE = BP.writeUInt16BE
+  arr.writeUInt32LE = BP.writeUInt32LE
+  arr.writeUInt32BE = BP.writeUInt32BE
+  arr.writeInt8 = BP.writeInt8
+  arr.writeInt16LE = BP.writeInt16LE
+  arr.writeInt16BE = BP.writeInt16BE
+  arr.writeInt32LE = BP.writeInt32LE
+  arr.writeInt32BE = BP.writeInt32BE
+  arr.writeFloatLE = BP.writeFloatLE
+  arr.writeFloatBE = BP.writeFloatBE
+  arr.writeDoubleLE = BP.writeDoubleLE
+  arr.writeDoubleBE = BP.writeDoubleBE
+  arr.fill = BP.fill
+  arr.inspect = BP.inspect
+  arr.toArrayBuffer = BP.toArrayBuffer
+
+  return arr
+}
+
+var INVALID_BASE64_RE = /[^+\/0-9A-z]/g
+
+function base64clean (str) {
+  // Node strips out invalid characters like \n and \t from the string, base64-js does not
+  str = stringtrim(str).replace(INVALID_BASE64_RE, '')
+  // Node allows for non-padded base64 strings (missing trailing ===), base64-js does not
+  while (str.length % 4 !== 0) {
+    str = str + '='
+  }
+  return str
+}
+
+function stringtrim (str) {
+  if (str.trim) return str.trim()
+  return str.replace(/^\s+|\s+$/g, '')
+}
+
+function isArrayish (subject) {
+  return isArray(subject) || Buffer.isBuffer(subject) ||
+      subject && typeof subject === 'object' &&
+      typeof subject.length === 'number'
+}
+
+function toHex (n) {
+  if (n < 16) return '0' + n.toString(16)
+  return n.toString(16)
+}
+
+function utf8ToBytes (str) {
+  var byteArray = []
+  for (var i = 0; i < str.length; i++) {
+    var b = str.charCodeAt(i)
+    if (b <= 0x7F) {
+      byteArray.push(b)
+    } else {
+      var start = i
+      if (b >= 0xD800 && b <= 0xDFFF) i++
+      var h = encodeURIComponent(str.slice(start, i+1)).substr(1).split('%')
+      for (var j = 0; j < h.length; j++) {
+        byteArray.push(parseInt(h[j], 16))
+      }
+    }
+  }
+  return byteArray
+}
+
+function asciiToBytes (str) {
+  var byteArray = []
+  for (var i = 0; i < str.length; i++) {
+    // Node's code seems to be doing this and not & 0x7F..
+    byteArray.push(str.charCodeAt(i) & 0xFF)
+  }
+  return byteArray
+}
+
+function utf16leToBytes (str) {
+  var c, hi, lo
+  var byteArray = []
+  for (var i = 0; i < str.length; i++) {
+    c = str.charCodeAt(i)
+    hi = c >> 8
+    lo = c % 256
+    byteArray.push(lo)
+    byteArray.push(hi)
+  }
+
+  return byteArray
+}
+
+function base64ToBytes (str) {
+  return base64.toByteArray(str)
+}
+
+function blitBuffer (src, dst, offset, length, unitSize) {
+  if (unitSize) length -= length % unitSize;
+  for (var i = 0; i < length; i++) {
+    if ((i + offset >= dst.length) || (i >= src.length))
+      break
+    dst[i + offset] = src[i]
+  }
+  return i
+}
+
+function decodeUtf8Char (str) {
+  try {
+    return decodeURIComponent(str)
+  } catch (err) {
+    return String.fromCharCode(0xFFFD) // UTF 8 invalid char
+  }
+}
+
+},{"base64-js":4,"ieee754":5,"is-array":6}],4:[function(require,module,exports){
+var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+;(function (exports) {
+	'use strict';
+
+  var Arr = (typeof Uint8Array !== 'undefined')
+    ? Uint8Array
+    : Array
+
+	var PLUS   = '+'.charCodeAt(0)
+	var SLASH  = '/'.charCodeAt(0)
+	var NUMBER = '0'.charCodeAt(0)
+	var LOWER  = 'a'.charCodeAt(0)
+	var UPPER  = 'A'.charCodeAt(0)
+
+	function decode (elt) {
+		var code = elt.charCodeAt(0)
+		if (code === PLUS)
+			return 62 // '+'
+		if (code === SLASH)
+			return 63 // '/'
+		if (code < NUMBER)
+			return -1 //no match
+		if (code < NUMBER + 10)
+			return code - NUMBER + 26 + 26
+		if (code < UPPER + 26)
+			return code - UPPER
+		if (code < LOWER + 26)
+			return code - LOWER + 26
+	}
+
+	function b64ToByteArray (b64) {
+		var i, j, l, tmp, placeHolders, arr
+
+		if (b64.length % 4 > 0) {
+			throw new Error('Invalid string. Length must be a multiple of 4')
+		}
+
+		// the number of equal signs (place holders)
+		// if there are two placeholders, than the two characters before it
+		// represent one byte
+		// if there is only one, then the three characters before it represent 2 bytes
+		// this is just a cheap hack to not do indexOf twice
+		var len = b64.length
+		placeHolders = '=' === b64.charAt(len - 2) ? 2 : '=' === b64.charAt(len - 1) ? 1 : 0
+
+		// base64 is 4/3 + up to two characters of the original data
+		arr = new Arr(b64.length * 3 / 4 - placeHolders)
+
+		// if there are placeholders, only get up to the last complete 4 chars
+		l = placeHolders > 0 ? b64.length - 4 : b64.length
+
+		var L = 0
+
+		function push (v) {
+			arr[L++] = v
+		}
+
+		for (i = 0, j = 0; i < l; i += 4, j += 3) {
+			tmp = (decode(b64.charAt(i)) << 18) | (decode(b64.charAt(i + 1)) << 12) | (decode(b64.charAt(i + 2)) << 6) | decode(b64.charAt(i + 3))
+			push((tmp & 0xFF0000) >> 16)
+			push((tmp & 0xFF00) >> 8)
+			push(tmp & 0xFF)
+		}
+
+		if (placeHolders === 2) {
+			tmp = (decode(b64.charAt(i)) << 2) | (decode(b64.charAt(i + 1)) >> 4)
+			push(tmp & 0xFF)
+		} else if (placeHolders === 1) {
+			tmp = (decode(b64.charAt(i)) << 10) | (decode(b64.charAt(i + 1)) << 4) | (decode(b64.charAt(i + 2)) >> 2)
+			push((tmp >> 8) & 0xFF)
+			push(tmp & 0xFF)
+		}
+
+		return arr
+	}
+
+	function uint8ToBase64 (uint8) {
+		var i,
+			extraBytes = uint8.length % 3, // if we have 1 byte left, pad 2 bytes
+			output = "",
+			temp, length
+
+		function encode (num) {
+			return lookup.charAt(num)
+		}
+
+		function tripletToBase64 (num) {
+			return encode(num >> 18 & 0x3F) + encode(num >> 12 & 0x3F) + encode(num >> 6 & 0x3F) + encode(num & 0x3F)
+		}
+
+		// go through the array every three bytes, we'll deal with trailing stuff later
+		for (i = 0, length = uint8.length - extraBytes; i < length; i += 3) {
+			temp = (uint8[i] << 16) + (uint8[i + 1] << 8) + (uint8[i + 2])
+			output += tripletToBase64(temp)
+		}
+
+		// pad the end with zeros, but make sure to not forget the extra bytes
+		switch (extraBytes) {
+			case 1:
+				temp = uint8[uint8.length - 1]
+				output += encode(temp >> 2)
+				output += encode((temp << 4) & 0x3F)
+				output += '=='
+				break
+			case 2:
+				temp = (uint8[uint8.length - 2] << 8) + (uint8[uint8.length - 1])
+				output += encode(temp >> 10)
+				output += encode((temp >> 4) & 0x3F)
+				output += encode((temp << 2) & 0x3F)
+				output += '='
+				break
+		}
+
+		return output
+	}
+
+	exports.toByteArray = b64ToByteArray
+	exports.fromByteArray = uint8ToBase64
+}(typeof exports === 'undefined' ? (this.base64js = {}) : exports))
+
+},{}],5:[function(require,module,exports){
+exports.read = function(buffer, offset, isLE, mLen, nBytes) {
+  var e, m,
+      eLen = nBytes * 8 - mLen - 1,
+      eMax = (1 << eLen) - 1,
+      eBias = eMax >> 1,
+      nBits = -7,
+      i = isLE ? (nBytes - 1) : 0,
+      d = isLE ? -1 : 1,
+      s = buffer[offset + i];
+
+  i += d;
+
+  e = s & ((1 << (-nBits)) - 1);
+  s >>= (-nBits);
+  nBits += eLen;
+  for (; nBits > 0; e = e * 256 + buffer[offset + i], i += d, nBits -= 8);
+
+  m = e & ((1 << (-nBits)) - 1);
+  e >>= (-nBits);
+  nBits += mLen;
+  for (; nBits > 0; m = m * 256 + buffer[offset + i], i += d, nBits -= 8);
+
+  if (e === 0) {
+    e = 1 - eBias;
+  } else if (e === eMax) {
+    return m ? NaN : ((s ? -1 : 1) * Infinity);
+  } else {
+    m = m + Math.pow(2, mLen);
+    e = e - eBias;
+  }
+  return (s ? -1 : 1) * m * Math.pow(2, e - mLen);
+};
+
+exports.write = function(buffer, value, offset, isLE, mLen, nBytes) {
+  var e, m, c,
+      eLen = nBytes * 8 - mLen - 1,
+      eMax = (1 << eLen) - 1,
+      eBias = eMax >> 1,
+      rt = (mLen === 23 ? Math.pow(2, -24) - Math.pow(2, -77) : 0),
+      i = isLE ? 0 : (nBytes - 1),
+      d = isLE ? 1 : -1,
+      s = value < 0 || (value === 0 && 1 / value < 0) ? 1 : 0;
+
+  value = Math.abs(value);
+
+  if (isNaN(value) || value === Infinity) {
+    m = isNaN(value) ? 1 : 0;
+    e = eMax;
+  } else {
+    e = Math.floor(Math.log(value) / Math.LN2);
+    if (value * (c = Math.pow(2, -e)) < 1) {
+      e--;
+      c *= 2;
+    }
+    if (e + eBias >= 1) {
+      value += rt / c;
+    } else {
+      value += rt * Math.pow(2, 1 - eBias);
+    }
+    if (value * c >= 2) {
+      e++;
+      c /= 2;
+    }
+
+    if (e + eBias >= eMax) {
+      m = 0;
+      e = eMax;
+    } else if (e + eBias >= 1) {
+      m = (value * c - 1) * Math.pow(2, mLen);
+      e = e + eBias;
+    } else {
+      m = value * Math.pow(2, eBias - 1) * Math.pow(2, mLen);
+      e = 0;
+    }
+  }
+
+  for (; mLen >= 8; buffer[offset + i] = m & 0xff, i += d, m /= 256, mLen -= 8);
+
+  e = (e << mLen) | m;
+  eLen += mLen;
+  for (; eLen > 0; buffer[offset + i] = e & 0xff, i += d, e /= 256, eLen -= 8);
+
+  buffer[offset + i - d] |= s * 128;
+};
+
+},{}],6:[function(require,module,exports){
+
+/**
+ * isArray
+ */
+
+var isArray = Array.isArray;
+
+/**
+ * toString
+ */
+
+var str = Object.prototype.toString;
+
+/**
+ * Whether or not the given `val`
+ * is an array.
+ *
+ * example:
+ *
+ *        isArray([]);
+ *        // > true
+ *        isArray(arguments);
+ *        // > false
+ *        isArray('');
+ *        // > false
+ *
+ * @param {mixed} val
+ * @return {bool}
+ */
+
+module.exports = isArray || function (val) {
+  return !! val && '[object Array]' == str.call(val);
+};
+
+},{}],7:[function(require,module,exports){
 (function (global){
 /**
  * @license
@@ -6954,7 +8418,7 @@ $( function() {
 }.call(this));
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],3:[function(require,module,exports){
+},{}],8:[function(require,module,exports){
 var pSlice = Array.prototype.slice,
     _ = require( 'lodash' );
 
@@ -7024,14 +8488,14 @@ function checkObjParts( fullObj, partialObj, opts ) {
     return true;
 }
 
-},{"lodash":2}],4:[function(require,module,exports){
+},{"lodash":7}],9:[function(require,module,exports){
 var util = require( './util' );
 
 module.exports = function coverage( path, src, parseTree ) {
     
     return "/* Code Coverage */\n" + src;    
 };
-},{"./util":12}],5:[function(require,module,exports){
+},{"./util":17}],10:[function(require,module,exports){
 function DirectiveStack() { 
     this._stack = [];
     this._on = true;
@@ -7080,7 +8544,7 @@ DirectiveStack.prototype = {
 };
 
 module.exports = DirectiveStack;
-},{}],6:[function(require,module,exports){
+},{}],11:[function(require,module,exports){
 var Edits = module.exports = function Edits(initialValue) { 
     this.origValue = initialValue;
     this.edits = [];
@@ -7113,7 +8577,7 @@ Edits.prototype.apply = function applyEdits() {
 Edits.prototype.insert = function( str, beforeIndex ) { 
     this.edits.push( { insert_pos: beforeIndex, content: str } );
 };
-},{}],7:[function(require,module,exports){
+},{}],12:[function(require,module,exports){
 // instrument.js
 
 var util = require( './util' ),
@@ -7123,73 +8587,69 @@ var util = require( './util' ),
 function isInstrumented( funcBody ) {
 
     var __fDeclr = {
-        "arity": "binary",
-        "value": "=",
-        "first": {
-            "arity": "name",
-            "value": "__f",
-            "id": "(name)"
-        },
-        "second": {
-            "arity": "literal",
-            /* "value": "path_to_x", */
-            "id": "(literal)"
-        },
-        "id": "=",
-        "dataType": {
-            "arity": "name",
-            "value": "Dynamic",
-            "id": "dynamic"
-        }
-    };
+            "type": "VariableDeclaration",
+            "declarations": [
+               {
+                  "type": "VariableDeclarator",
+                  "name": {
+                     "id": "(name)",
+                     "value": "__f"
+                  },
+                  "dataType": {
+                     "id": "dynamic",
+                     "value": "Dynamic"
+                  }
+               }
+            ]
+         };
 
     return funcBody && funcBody.length && partialCompare( funcBody[0], __fDeclr );
 }
 
-function enterFn( editList, funcID, node ) { 
-    editList.insert( "\n\tDynamic __f='" + funcID + "'; Object __p=$Pflr;__p.I(__f,this)\n", node.to + 1 );
+function enterFn( editList, funcID, code, pos ) { 
+    var indentStr = findIndent( code, pos );
+    editList.insert( "Dynamic __f='" + funcID + "'; Object __p=$Pflr;__p.I(__f,this)\n" + indentStr, pos );
 }
 
-function exitFn( editList, code, node ) {
-    var indent = findIndent( code, node.from );
-    editList.insert( "\t__p.O(__f)\n", node.from ); 
+function exitFn( editList, code, pos ) {
+    editList.insert( "\t__p.O(__f)\n", pos ); 
 } 
 
 function returnFn( editList, code, node ) {
-    var indentStr = findIndent( code, node.from );
+    var indentStr = findIndent( code, node.range[0] );
     
     // if the return value is not a simple value, first store it in a temporary variable before returning...
 
-    if( isSimpleOp( node.first ) ) {
-        editList.insert( "__p.O(__f)\n" + indentStr, node.from );
+    if( isSimpleOp( node.argument ) ) {
+        editList.insert( "__p.O(__f)\n" + indentStr, node.range[0] );
         return;
     }
     
     //                                     ++++++++++      +++++++++++              ++++++++++++++++++++++++++++++++++++++++++        
     // convert: "return ( x() * y() )" to "Dynamic __return123131232 = ( x() * y() ); __prf.O(__fid); return __return123131232"
     
-    var returnExprEnd = node.eos.from, 
-        returnBegin = node.from,
-        returnEnd = node.to,
+    var returnExprEnd = node.range[1], 
+        returnBegin = node.range[0],
+        returnEnd = returnBegin + 6,
         rTmpID = "" + returnBegin,
         tmpVar = "__return" + rTmpID;
 
     var full_str = code.substring( returnBegin, returnExprEnd + 1 );
     var return_str = code.substring( returnBegin, returnEnd + 1 );
     var expr_str = code.substring( returnEnd, returnExprEnd + 1 );
-        
-    editList.insert( rTmpID + "=", returnEnd + 1 );
+
+    editList.insert( rTmpID + "=", returnEnd );
     editList.insert( "Dynamic __", returnBegin );
-    editList.insert(  "; __p.O(__f); return " + tmpVar + "\n" + indentStr, returnExprEnd );
+    editList.insert(  "; __p.O(__f); return " + tmpVar, returnExprEnd + 1 );
 }
 
 function isSimpleOp( node ) { 
     if ( !node || node.id === "(name)" || node.id === "(literal)" || node.arity === 'literal' ) { 
         return true;
     }
-    else if( node.id === "." ) { 
-        return ( !node.first || node.first.id === "(name)" || node.first.id === "(literal)" || node.first.arity === "literal" ) && 
-                ( node.second && ( node.second.id === "(name)" || node.second.id === "(literal)" || node.second.arity === "literal" ) );
+    else if( node.type === "MemberExpression" ) { 
+        return ( !node.object || node.object.id === "(name)" || node.object.id === "(literal)" || node.object.arity === "literal" ) && 
+                ( node.property && ( node.property.id === "(name)" || node.property.id === "(literal)" || node.property.arity === "literal" ) );
     }
     return false;
 }
@@ -7228,31 +8688,34 @@ function instrument( scriptRefStr, code, parseTree, manglerFn ) {
     var alreadyInstrumented = false;
     
     statements.every( function( node ) { 
-        if( node && node.id === "function" ) { 
+        if( node && node.type === "FunctionDeclaration" ) { 
             var funcID = manglerFn( scriptRefStr, node.name );
 
-            var funcBody = util.isArray( node.body ) ? ( node.body || [] ) : [ node.body ];
+            var bodyStatements = null;
 
-            if( isInstrumented( funcBody ) ) { 
-                alreadyInstrumented = true;
-                return false;
-            }
-            
-            // instrument the start and end of the function
-            enterFn( editsList, funcID, node.start );
+            if( node.body ) { 
+                bodyStatements = node.body;
+                
+                if( isInstrumented( bodyStatements ) ) { 
+                    alreadyInstrumented = true;
+                    return false;
+                }
 
-            // instrument any returns in the body of the function.
-            instrumentReturns( editsList, code, funcBody );
-            
-            var lastStatement = null;
-            
-            if( funcBody.length ) {
-                lastStatement = ( funcBody[funcBody.length - 1] || {} ).id;
-            }
-            
-            if( lastStatement !== "return" ) { 
-                // instrument the exit of the function
-                exitFn( editsList, code, node.end );
+                enterFn( editsList, funcID, code, bodyStatements[0].range[0] );
+                
+                // instrument any returns in the body of the function.
+                instrumentReturns( editsList, code, bodyStatements );
+                
+                var lastStatement = null;
+                
+                if( bodyStatements.length ) {
+                    lastStatement = ( bodyStatements[bodyStatements.length - 1] || {} ).id;
+                }
+                
+                if( lastStatement !== "return" ) { 
+                    // instrument the exit of the function
+                    exitFn( editsList, code, bodyStatements[bodyStatements.length - 1].range[1] );
+                }
             }
         }
         return true;
@@ -7271,7 +8734,7 @@ function instrumentReturns( editList, code, node ) {
             return;
         }
         
-        children = util.isArray( node ) ? node : util.compact( [ node.first, node.second, node.third, node.fourth, node.body, node.bodyAlt ] );
+        children = util.isArray( node ) ? node : util.compact( [ node.left, node.right, node.body, node.consequent, node.alternate ] );
         
         children.forEach( function( n ) { 
             instrumentReturns( editList, code, n );
@@ -7280,15 +8743,10 @@ function instrumentReturns( editList, code, node ) {
 } 
 
 module.exports = instrument;
-},{"./compare":3,"./edits":6,"./util":12}],8:[function(require,module,exports){
-function Lexer( code ){ 
-    if( code !== null && typeof code !== 'undefined' ) { 
-        this.setInput( code );
-    }
-    else { 
-        this.code = ""; 
-        this.pos = 0;
-    }
+},{"./compare":8,"./edits":11,"./util":17}],13:[function(require,module,exports){
+function Lexer( code, options ) { 
+    options = options || {};
+    this.setInput( code || "" );
 }
 
 module.exports = Lexer;
@@ -7301,17 +8759,15 @@ var LINE_COMMENT = 1,
     NUMBER_NO_DECIMAL = 6,
     NUMBER_DECIMAL = 7,
     ELLIPSIS = 8,
-    OBJ_LITERAL = 9;
+    OBJ_LITERAL = 9,
+    WHITESPACE = 10;
 
 function makeToken( t, v, line, from, to, colFrom, colTo ) { 
     return { 
         type: t, 
         value: v, 
-        line: line, 
-        from: from, 
-        to: to, 
-        colFrom: colFrom, 
-        colTo: colTo 
+        range: [from, to],
+        loc: { start: { line: line, col: colFrom }, end: { line: line, col: colTo } }
     };
 }
     
@@ -7324,10 +8780,15 @@ Lexer.prototype = {
         this.done = ( this.code.length === 0 );
         this.curToken = null;
         this.indent = "";
+        this.whitespace = []; 
     },
     
     getSource: function() { 
         return this.code || "";
+    },
+    
+    getWhitespace: function() { 
+        return this.whitespace;
     },
     
     readNextToken: function() { 
@@ -7349,274 +8810,298 @@ Lexer.prototype = {
             ch1 = '\n';
         }
         
-        if( ch === "" ) { 
-            this.done = true;
-        }
-        
-        while( this.done === false ) {
-            switch( state ) { 
-            case 0:
-                from = this.pos;
-                colFrom = this.linePos;
+        if( ch !== "" && !this.done ) { 
+            
+            while( true ) {
+                switch( state ) { 
+                case 0:
+                    from = this.pos;
+                    colFrom = this.linePos;
 
-                // start state 
-                if( ch === ';' ) {
-                    result = makeToken( "(nl)", ch, this.line, from, this.pos, colFrom, this.linePos );
-                }
-                else if( ch === '\n' ) {
-                    if( continuation ) {
-                        continuation = false;
-                        // skip newline.
-                        token = "";
+                    // start state 
+                    if( /[_A-Za-z]/.test( ch ) ) {
+                        if( !/[_A-Za-z0-9]/.test( ch1 ) )  { 
+                            result = makeToken( "name", ch, this.line, from, this.pos, colFrom, this.linePos );
+                        }
+                        else { 
+                            state = VARIABLE;
+                            token = ch;
+                        }
                     }
-                    else {
+                    else if( /[ \t]/.test( ch ) ) { 
+                        if( /[ \t]/.test( ch1 ) ) {
+                            token = ch;
+                            state = WHITESPACE;
+                        }
+                        else {
+                            this.whitespace.push( makeToken( "(ws)", ch, this.line, from, this.pos, colFrom, this.linePos ) );
+                        }
+                    }
+                    else if( ch === ';' ) {
                         result = makeToken( "(nl)", ch, this.line, from, this.pos, colFrom, this.linePos );
                     }
-                }                
-                else if( ch === '\\' ) { 
-                    continuation = true;
-                }     
-                else if( ch === "/" && ch1 === "/" ) { 
-                    state = LINE_COMMENT;
-                }
-                else if( ch === "/" && ch1 === "*" ) { 
-                    eat = true;
-                    state = BLOCK_COMMENT;
-                    addCommentNewline = false;
-                    nlInComment = false;
-                }
-                else if( ch === "'" ) { 
-                    state = SINGLE_STR;
-                }
-                else if( ch === '"' ) { 
-                    state = DOUBLE_STR;
-                }
-                else if( ch === '.' && ch1 === '.' ) { 
-                    state = ELLIPSIS;
-                    token = ".";
-                }
-                else if( /[_A-Za-z]/.test( ch ) && !/[_A-Za-z0-9]/.test( ch1 ) )  { 
-                    result = makeToken( "name", ch, this.line, from, this.pos, colFrom, this.linePos );
-                }
-                else if( /[_A-Za-z]/.test( ch ) ) { 
-                    state = VARIABLE;
-                    token = ch;
-                }
-                else if( ch === "." && /[0-9]/.test( ch1 ) ) { 
-                    state = NUMBER_DECIMAL;
-                    token = ch;
-                }
-                else if( /[0-9]/.test( ch ) && ch1 === "." ) { 
-                    state = NUMBER_NO_DECIMAL;
-                    token = ch;
-                }
-                else if( /[0-9]/.test( ch ) && !/[0-9]/.test( ch1 ) ) { 
-                    result = makeToken( "number", ch, this.line, from, this.pos, colFrom, this.linePos );
-                }
-                else if( /[0-9]/.test( ch ) ) { 
-                    state = NUMBER_NO_DECIMAL;
-                    token = ch;
-                }
-                else if( ch === '#' && /[0-9]/.test( ch1 ) ) { 
-                    state = OBJ_LITERAL;
-                    token = '#';
-                }
-                else if( ch === "$" && ch1 === "$" ) { 
-                    result = makeToken( "operator", "$$", this.line, from, this.pos, colFrom, this.linePos );
-                    eat = true;
-                }
-                else if( ch === "$" ) { 
-                    result = makeToken( "operator", "$", this.line, from, this.pos, colFrom, this.linePos );
-                }
-                else if( ( "&^|+-*/%<>=!".indexOf( ch ) != -1 && ch1 === "=" ) ||
-                   ( ch === "<" && ch1 === ">" ) || 
-                   ( ch === "<" && ch1 === "<" ) || 
-                   ( ch === ">" && ch1 === ">" ) || 
-                   ( ch === "|" && ch1 === "|" ) ||
-                   ( ch === "&" && ch1 === "&" ) ||
-                   ( ch === "&" && ch1 === "&" ) ||
-                   ( ch === "^" && ch1 === "^" ) ) {
-                    result = makeToken( "operator", ch + ch1, this.line, from, this.pos, colFrom, this.linePos );
-                    eat = true;
-                }
-                else if( "#{}/%*,.()[]?:<>!=+-^|&".indexOf( ch ) != -1 ) { 
-                    result = makeToken( "operator", ch, this.line, from, this.pos, colFrom, this.linePos );
-                }
-                break;
-            case 1: // LINE_COMMENT
-                if( ch1 === '\n' ) {
-                    if( !continuation ) { 
-                        result = makeToken( '(nl)', "", this.line,from, this.pos, colFrom, this.linePos );
-                    }
-                    
-                    // ignore comments.
-                    eat = true;                    
-                    state = 0;
-                    token = "";
-                }
-                else { 
-                    token += ch;
-                }
-                break;
-            case 2: // BLOCK COMMENT
-                if( ch === '*' && ch1 === '/' ) { 
+                    else if( ch === '\n' ) {
+                        if( continuation ) {
+                            this.whitespace.push( makeToken( "(nl)", ch, this.line, from, this.pos, colFrom, this.linePos ) );
 
-                    // ignore comments.
-                    state = 0;
-                    token = "";
-                    
-                    // We want block comments to add one newline token if it contains a newline.
-                    // However, if it only contains one newline and it was preceded by a continuation token,
-                    // don't add the newline.
-                    if( ( continuation === false && nlInComment ) || addCommentNewline ) {
-                        result = makeToken( '(nl)', "", tmpLine || this.line, from, from, colFrom, colFrom );                    
+                            // skip newline.
+                            continuation = false;
+                            token = "";
+                        }
+                        else {
+                            result = makeToken( "(nl)", ch, this.line, from, this.pos, colFrom, this.linePos );
+                        }
+                    }                
+                    else if( ch === '\\' ) { 
+                        continuation = true;
+                        this.whitespace.push( makeToken( "continuation", ch, this.line, from, this.pos, colFrom, this.linePos ) );
+                    } 
+                    else if( ch === "/" && ch1 === "/" ) { 
+                        state = LINE_COMMENT;
+                        token = ch;
+                    }
+                    else if( ch === "/" && ch1 === "*" ) { 
+                        eat = true;
+                        state = BLOCK_COMMENT;
+                        addCommentNewline = false;
+                        nlInComment = false;
+                        token = "/*";
+                    }
+                    else if( ch === "'" ) { 
+                        state = SINGLE_STR;
+                    }
+                    else if( ch === '"' ) { 
+                        state = DOUBLE_STR;
+                    }
+                    else if( ch === '.' && ch1 === '.' ) { 
+                        state = ELLIPSIS;
+                        token = ".";
+                    }
+                    else if( ch === "." && /[0-9]/.test( ch1 ) ) { 
+                        state = NUMBER_DECIMAL;
+                        token = ch;
+                    }
+                    else if( /[0-9]/.test( ch ) && ch1 === "." ) { 
+                        state = NUMBER_NO_DECIMAL;
+                        token = ch;
+                    }
+                    else if( /[0-9]/.test( ch ) && !/[0-9]/.test( ch1 ) ) { 
+                        result = makeToken( "number", ch, this.line, from, this.pos, colFrom, this.linePos );
+                    }
+                    else if( /[0-9]/.test( ch ) ) { 
+                        state = NUMBER_NO_DECIMAL;
+                        token = ch;
+                    }
+                    else if( ch === '#' && /[0-9]/.test( ch1 ) ) { 
+                        state = OBJ_LITERAL;
+                        token = '#';
+                    }
+                    else if( ch === "$" && ch1 === "$" ) { 
+                        result = makeToken( "operator", "$$", this.line, from, this.pos, colFrom, this.linePos );
+                        eat = true;
+                    }
+                    else if( ch === "$" ) { 
+                        result = makeToken( "operator", "$", this.line, from, this.pos, colFrom, this.linePos );
+                    }
+                    else if( ( "&^|+-*/%<>=!".indexOf( ch ) != -1 && ch1 === "=" ) ||
+                       ( ch === "<" && ch1 === ">" ) || 
+                       ( ch === "<" && ch1 === "<" ) || 
+                       ( ch === ">" && ch1 === ">" ) || 
+                       ( ch === "|" && ch1 === "|" ) ||
+                       ( ch === "&" && ch1 === "&" ) ||
+                       ( ch === "&" && ch1 === "&" ) ||
+                       ( ch === "^" && ch1 === "^" ) ) {
+                        result = makeToken( "operator", ch + ch1, this.line, from, this.pos, colFrom, this.linePos );
+                        eat = true;
+                    }
+                    else if( "#{}/%*,.()[]?:<>!=+-^|&".indexOf( ch ) != -1 ) { 
+                        result = makeToken( "operator", ch, this.line, from, this.pos, colFrom, this.linePos );
                     }
                     
-                    eat = true;
-                }
-                else { 
-                    if( ch === '\n' ) {
-                        if( nlInComment === false ) {
-                            tmpLine = this.line;
-                            from = this.pos; 
-                            colFrom = this.linePos;
+                    break;
+                case 1: // LINE_COMMENT
+                    if( ch1 === '\n' ) {
+                        if( !continuation ) { 
+                            this.whitespace.push( makeToken( "LineComment", token, this.line, from, this.pos, colFrom, this.linePos ) );
+                            result = makeToken( '(nl)', ch1, this.line, from, this.pos, colFrom, this.linePos );
+                        }
+                        else { 
+                            this.whitespace.push( makeToken( "LineComment", token, this.line, from, this.pos, colFrom, this.linePos ) );
+                            this.whitespace.push( makeToken( "(nl)", ch1, this.line, from, this.pos, colFrom, this.linePos ) );
                         }
                         
-                        // If this is >= second newline, and we're preceded by a continuation, add a newline.
-                        addCommentNewline = continuation && nlInComment;
-                        nlInComment = true;
+                        // ignore comments.
+                        eat = true;                    
+                        state = 0;
+                        token = "";
                     }
+                    else { 
+                        token += ch;
+                    }
+                    break;
+                case 2: // BLOCK COMMENT
+                    if( ch === '*' && ch1 === '/' ) { 
+                        this.whitespace.push( makeToken( "BlockComment", token + "*/", this.line, from, this.pos, colFrom, this.linePos ) );
+                        
+                        // ignore comments.
+                        state = 0;
+                        token = "";
+                        
+                        // We want block comments to add one newline token if it contains a newline.
+                        // However, if it only contains one newline and it was preceded by a continuation token,
+                        // don't add the newline.
+                        if( ( continuation === false && nlInComment ) || addCommentNewline ) {
+                            result = makeToken( '(nl)', "", tmpLine || this.line, from, from, colFrom, colFrom );                    
+                        }
+                        
+                        eat = true;
+                    }
+                    else { 
+                        if( ch === '\n' ) {
+                            if( nlInComment === false ) {
+                                tmpLine = this.line;
+                                from = this.pos; 
+                                colFrom = this.linePos;
+                            }
+                            
+                            // If this is >= second newline, and we're preceded by a continuation, add a newline.
+                            addCommentNewline = continuation && nlInComment;
+                            nlInComment = true;
+                        }
+                        token += ch;
+                    }
+                    break;
+                case 3: // SINGLE_STR 
+                    if( ch === "'" && ch1 === "'" ) {   
+                        token += "'";
+                        eat = true;
+                    }
+                    else if( ch === "'" ) { 
+                        result = makeToken( 'string', token, this.line, from, this.pos, colFrom, this.linePos );
+                    }
+                    else { 
+                        token += ch;
+                    }
+                    break;                
+                case 4: // DOUBLE_STR -- first ch will not be '"'
+                    if( ch === '"' && ch1 === '"' ) {   
+                        token += '"';
+                        eat = true;
+                    }
+                    else if( ch === '"' ) { 
+                        result = makeToken( 'string', token, this.line, from, this.pos, colFrom, this.linePos );
+                    }
+                    else { 
+                        token += ch;
+                    }
+                    break;                
+                case 5: // VARIABLE
                     token += ch;
-                }
-                break;
-            case 3: // SINGLE_STR 
-                if( ch === "'" && ch1 === "'" ) {   
-                    token += "'";
-                    eat = true;
-                }
-                else if( ch === "'" ) { 
-                    result = makeToken( 'string', token, this.line, from, this.pos, colFrom, this.linePos );
-                }
-                else { 
-                    token += ch;
-                }
-                break;                
-            case 4: // DOUBLE_STR -- first ch will not be '"'
-                if( ch === '"' && ch1 === '"' ) {   
-                    token += '"';
-                    eat = true;
-                }
-                else if( ch === '"' ) { 
-                    result = makeToken( 'string', token, this.line, from, this.pos, colFrom, this.linePos );
-                }
-                else { 
-                    token += ch;
-                }
-                break;                
-            case 5: // VARIABLE
-                token += ch;
-                
-                if( !/[_A-Za-z0-9]/.test( ch1 ) ) { 
-                    result = makeToken( 'name', token, this.line, from, this.pos, colFrom, this.linePos );
-                }
-                break;
-            case 6: // NUMBER_NO_DECIMAL
-                if( ch === '.'  ) { 
-                    if( /[0-9]/.test( ch1 ) ) {
-                        token += '.';
-                        state = NUMBER_DECIMAL;
+                    
+                    if( !/[_A-Za-z0-9]/.test( ch1 ) ) { 
+                        result = makeToken( 'name', token, this.line, from, this.pos, colFrom, this.linePos );
+                    }
+                    break;
+                case 6: // NUMBER_NO_DECIMAL
+                    if( ch === '.'  ) { 
+                        if( /[0-9]/.test( ch1 ) ) {
+                            token += '.';
+                            state = NUMBER_DECIMAL;
+                        }
+                        else {
+                            result = makeToken( 'number', token, this.line, from, this.pos, colFrom, this.linePos );
+                        }
+                    }
+                    else if( !/[.0-9]/.test( ch1 ) ) {
+                        result = makeToken( 'number', token + ch, this.line, from, this.pos, colFrom, this.linePos );
                     }
                     else {
-                        result = makeToken( 'number', token, this.line, from, this.pos, colFrom, this.linePos );
+                        token += ch;
+                    }                    
+                    break;
+                case 7: // NUMBER_DECIMAL 
+                    if( !/[0-9]/.test( ch1 ) ) {
+                        result = makeToken( 'number', token + ch, this.line, from, this.pos, colFrom, this.linePos );
                     }
+                    else {
+                        token += ch;
+                    }                    
+                    break;                
+                case 8: // ELLIPSIS
+                    token += ch;
+                    
+                    if( ch1 != '.' ) { 
+                        if( token != '...' ) { 
+                            token = "...";
+                        }
+                        result = makeToken( 'operator', token, this.line, from, this.pos, colFrom, this.linePos );
+                    }
+                    break;
+                case 9: // OBJ_LITERAL  -- #F1A981C3
+                    token += ch;
+                    
+                    if( !/[0-9a-fA-F]/.test( ch1 ) ) { 
+                        result = makeToken( 'objref', token, this.line, from, this.pos, colFrom, this.linePos );
+                    }
+                    break;
+                case 10: // WHITESPACE
+                    token += ch;
+                    
+                    if( !/[ \t]/.test( ch1 ) ) { 
+                        this.whitespace.push( makeToken( '(ws)', token, this.line, from, this.pos, colFrom, this.linePos ) );
+                        state = 0;
+                    }
+                    break;
                 }
-                else if( !/[.0-9]/.test( ch1 ) ) {
-                    result = makeToken( 'number', token + ch, this.line, from, this.pos, colFrom, this.linePos );
+               
+                if( eof ) {
+                    this.pos++; break;
+                }
+                
+                this.linePos++;
+                
+                // keep track of lines.
+                if( ch === '\n' ) { 
+                    this.line++; this.linePos = 0; 
+                }
+
+                if( eat ) { 
+                    this.linePos += 1;
+                    
+                    // consume the whole lookahead and keep track of lines.
+                    if( ch1 === '\n' ) { 
+                        this.line++; 
+                        this.linePos = 0; 
+                    }
+                     
+                    this.pos += 2;
+                    ch = this.code.charAt( this.pos );
                 }
                 else {
-                    token += ch;
-                }                    
-                break;
-            case 7: // NUMBER_DECIMAL 
-                if( !/[0-9]/.test( ch1 ) ) {
-                    result = makeToken( 'number', token + ch, this.line, from, this.pos, colFrom, this.linePos );
-                }
-                else {
-                    token += ch;
-                }                    
-                break;                
-            case 8: // ELLIPSIS
-                token += ch;
-                
-                if( ch1 != '.' ) { 
-                    if( token != '...' ) { 
-                        token = "...";
-                    }
-                    result = makeToken( 'operator', token, this.line, from, this.pos, colFrom, this.linePos );
+                    this.pos++;
+                    ch = ch1;
                 }
                 
-                break;
-            case 9: // OBJ_LITERAL  -- #F1A981C3
-                token += ch;
-                
-                if( !/[0-9a-fA-F]/.test( ch1 ) ) { 
-                    result = makeToken( 'objref', token, this.line, from, this.pos, colFrom, this.linePos );
+                if( result ) {             
+                    // if we have a result now, just exit.
+                    break;
                 }
                 
-                break;
-            default:
-                // skip these characters.
-            }
-           
-            if( eof ) {
-                this.pos++;
-                break;
-            }
-            
-            this.linePos++;
-            
-            // keep track of lines.
-            if( ch === '\n' ) { 
-                this.line++; 
-                this.linePos = 0; 
-            }
+                // update lookahead.
+                ch1 = this.code.charAt( this.pos + 1 );
 
-            if( eat ) { 
-                this.linePos += 1;
-                
-                // consume the whole lookahead and keep track of lines.
-                if( ch1 === '\n' ) { 
-                    this.line++; 
-                    this.linePos = 0; 
+                // check for eof conditions.
+                if( ch === "" ) { 
+                    // we must have consumed the lookahead and ran into the eof.
+                    break;
                 }
-                 
-                this.pos += 2;
-                ch = this.code.charAt( this.pos );
+                else if( ch1 === "" ) { 
+                    // lookahead is eof -- process one more character (set lookahead to newline).
+                    eof = true;
+                    ch1 = '\n';
+                }
+                eat = false;
             }
-            else {
-                this.pos++;
-                ch = ch1;
-            }
-            
-            if( result ) {             
-                // if we have a result now, just exit.
-                break;
-            }
-            
-            // update lookahead.
-            ch1 = this.code.charAt( this.pos + 1 );
-
-            // check for eof conditions.
-            if( ch === "" ) { 
-                // we must have consumed the lookahead and ran into the eof.
-                break;
-            }
-            else if( ch1 === "" ) { 
-                // lookahead is eof -- process one more character (set lookahead to newline).
-                eof = true;
-                ch1 = '\n';
-            }
-            eat = false;
         }
         
         if( ( !this.done && result === null ) ) {
@@ -7646,7 +9131,7 @@ Lexer.prototype = {
     }
 };
 
-},{}],9:[function(require,module,exports){
+},{}],14:[function(require,module,exports){
 var util = require( './util' );
 
 function identity(v) { return v; }
@@ -7725,7 +9210,7 @@ Macros.prototype = {
 };
 
 module.exports = Macros;
-},{"./util":12}],10:[function(require,module,exports){
+},{"./util":17}],15:[function(require,module,exports){
 
 // parse.js
 // OScript parser based on Douglas Crockford's javascript parser.
@@ -7733,7 +9218,8 @@ module.exports = Macros;
 
 var Lexer = require( './lexer' ),
     util = require( './util' ),
-    preprocessor = require( './preprocessor' );
+    preprocessor = require( './preprocessor' ),
+    clone = require( 'clone' );
     
 function make_parser( options ) {
     "use strict";
@@ -7776,7 +9262,8 @@ function make_parser( options ) {
         'and': '&&',
         'not': '!'
     };
-
+    
+    var whitespace = [];
     var lex = null;
     var scope;
     var symbol_table = {};
@@ -7944,11 +9431,8 @@ function make_parser( options ) {
         
         // create an object from the type defined in the symbol table.
         token = Object.create(o);
-        token.line  = t.line;
-        token.from  = t.from;
-        token.to    = t.to;
-        token.colFrom = t.colFrom;
-        token.colTo = t.colTo;
+        token.range = clone( t.range );
+        token.loc = clone( t.loc );
         token.value = v;
         token.arity = a;
                 
@@ -7976,7 +9460,7 @@ function make_parser( options ) {
     };
 
     var statement = function () {
-        var n = token, v;
+        var n = token, v, eosTok;
         
         // try to match labels...
         if( n.arity === 'name' ) { 
@@ -7997,8 +9481,16 @@ function make_parser( options ) {
                 }
                 else if( token.id === '(nl)' ) { 
                     // a variable type is allowed to be alone on a line --- essentially a noop.
+                    eosTok = token;
                     eos();
-                    return [];
+                    
+                    return { 
+                        type: "ExpressionStatement",
+                        range: [ n.range[0], eosTok.range[1] ],
+                        expression: n,
+                        eos: eosTok,
+                        arity: "statement"
+                    };
                 }
             }
             
@@ -8006,16 +9498,31 @@ function make_parser( options ) {
             reverse();
         }
         
+        // if our token has a std function it is one of our statements.
         if (n.std) {
             advance();
             return n.std();
         }
 
-        // try expression-statement
-        v = expression(0);
+        // anything else will be a statement expression
+        return statementExpression();
+    };
+    
+    var statementExpression = function( ) {
+        var v = expression(0);
+        
+        var eosTok = token;
         eos();
         
-        return v;
+        // if it's an expression statement, wrap it in an EpressionStatement.
+        return { 
+            type: "ExpressionStatement",
+            range: [ v.range[0], eosTok.range[1] ],
+            loc: [ v.loc.start, eosTok.loc.end ],
+            expression: v,
+            eos: eosTok,
+            arity: "statement"
+        };    
     };
 
     var statements = function () {
@@ -8029,7 +9536,12 @@ function make_parser( options ) {
                 a.push(s);
             }
         }
-        return a.length === 0 ? null : a.length === 1 ? a[0] : a;
+        
+        if( a.length === 0 ) { 
+            return null;
+        }
+
+        return a;
     };
 
     var original_symbol = {
@@ -8061,7 +9573,21 @@ function make_parser( options ) {
         }
         return s;
     };
+    
+    var getLocStart = function( ref ) {
+        if( ref && ref.loc ) {
+            return ref.loc.start;
+        }
+        return null;
+    };
 
+    var getLocEnd = function( ref ) {
+        if( ref && ref.loc ) {
+            return ref.loc.end;
+        }
+        return null;
+    };
+    
     var constant = function (s, v) {
         var x = symbol(s);
         x.nud = function () {
@@ -8073,13 +9599,19 @@ function make_parser( options ) {
         x.value = v;
         return x;
     };
-
+    
     var infix = function (id, bp, led) {
         var s = symbol(id, bp);
         s.led = led || function (left) {
-            this.first = left;
-            this.second = expression(bp);
+        
+            this.left = left;
+            this.right = expression(bp);
             this.arity = "binary";
+            this.type = operatorType[id] || "BinaryExpression";
+            
+            this.range = [ this.left.range[0], this.right.range[1] ];
+            this.loc = { start: getLocStart( this.left ), end: getLocEnd( this.right ) };
+            
             return this;
         };
         return s;
@@ -8088,9 +9620,15 @@ function make_parser( options ) {
     var infixr = function (id, bp, led) {
         var s = symbol(id, bp);
         s.led = led || function (left) {
-            this.first = left;
-            this.second = expression(bp - 1);
+        
+            this.left = left;
+            this.right = expression(bp - 1);
             this.arity = "binary";
+            this.type = operatorType[id] || "BinaryExpression";
+            
+            this.range = [ this.left.range[0], this.right.range[1] ];
+            this.loc = { start:  getLocStart( this.left ), end: getLocEnd( this.right ) };
+
             return this;
         };
         return s;
@@ -8101,10 +9639,17 @@ function make_parser( options ) {
             if (left.id !== "." && left.id !== "[" && left.id !== '$' && left.id !== '$$' && left.arity !== "name" ) {
                 token_error( left,"Bad lvalue.");
             }
-            this.first = left;
-            this.second = expression(9);
+            this.left = left;
+            this.right = expression(9);
             this.assignment = true;
             this.arity = "binary";
+
+            this.type = "AssignmentExpression";
+            this.operator = this.id;
+            
+            this.range = [ this.left.range[0], this.right.range[1] ];
+            this.loc = { start:  getLocStart( this.left ), end: getLocEnd( this.right ) };
+            
             return this;
         });
     };
@@ -8113,8 +9658,14 @@ function make_parser( options ) {
         var s = symbol(id);
         s.nud = nud || function () {
             scope.reserve(this);
-            this.first = expression(70);
+            this.argument = expression(70);
             this.arity = "unary";
+            this.type = operatorType[id] || "UnaryExpression";
+            this.operator = this.id;
+            this.prefix = true;
+            this.range = [ this.range[0], this.argument.range[1] ];
+            this.loc = { start:  getLocStart( this ), end: getLocEnd( this.argument ) };
+
             return this;
         };
         return s;
@@ -8124,8 +9675,13 @@ function make_parser( options ) {
         var s = symbol(id);
         s.nud = nud || function () {
             scope.reserve(this);
-            this.first = expression(90);
+            this.argument = expression(90);
             this.arity = "unary";
+            this.type = operatorType[id] || "UnaryExpression";
+            this.operator = this.id;
+            this.range = [ this.range[0], this.argument.range[1] ];
+            this.loc = { start: getLocStart( this ), end: getLocEnd( this.argument ) };
+            
             return this;
         };
         return s;
@@ -8199,6 +9755,9 @@ function make_parser( options ) {
         advance(":");
         this.third = expression(0);
         this.arity = "ternary";
+        
+        this.range = [ this.first.range[0], this.third.range[1] ];
+        this.loc = { start:  getLocStart( this.first ), end: getLocEnd( this.third ) };
         return this;
     });
 
@@ -8232,80 +9791,114 @@ function make_parser( options ) {
     infix("/", 60);
     infix("%", 60);
 
+    var operatorType = {
+        '||': 'LogicalExpression',
+        '&&': 'LogicalExpression',
+        '^^': 'LogicalExpression',
+        '==': 'LogicalExpression'    
+    };
+    
     prefix_infix( ".", 80, function (left) {
         // infix version.
-        this.first = left;
+        this.object = left;
         if (token.id == '(' ) {
             advance( '(' );
-            this.second = expression( 10 );
+            this.property = expression( 10 );
+            this.computed = true;
+            
+            var end = token;
             advance( ')' );
+
+            this.range = [ this.object.range[0], end.range[1] ];
+            this.loc = { start:  getLocStart( this.object ), end: getLocEnd( end ) };
         }
         else { 
             token.arity = "literal";
-            this.second = token;
+            this.property = token;
+            this.computed = false;
             advance();
-        }   
 
+            this.range = [ this.object.range[0], this.property.range[1] ];
+            this.loc = { start:  getLocStart( this.object ), end: getLocEnd( this.property ) };
+        }   
+        
+        this.type = "MemberExpression";
         this.arity = "binary";
         return this;
     } );
 
     prefix_infix( "[", 80, function () {
-            var name = "";
+            var name = "", start = token;
             
             while( token.id === '.' || token.arity === 'name' ) { 
                 name += token.value;
                 advance();
             }
-                  
+            
+            var end = token;
             advance("]");
             
             this.first = name;
             this.id = "xlate";
             this.arity = "unary";
+            this.type = "XLateExpression";
+            this.range = [ start.range[0], end.range[1] ];
+            this.loc = { start:  getLocStart( start ), end: getLocEnd( end ) };
+            
             return this;
         }, 
         function (left) {
-            var range;
-            this.first = left;
+            
+            // first should resolve to some object.
+            this.object = left;
+
+            var range = clone( this );
 
             if( token.id === ':' ) { 
-                range = token;
-                range.id = ":";
-                range.arity = "binary";
+                // range specifier with empty start index.
+
+                this.fromIndex = null;
+                this.toIndex = null;
+                this.type = "RangeExpression";
                 
                 advance( ":" );
-
-                this.second = range;
                 
                 if( token.id !== "]" ) { 
-                    range.second = expression( 0 );
+                    this.toIndex = expression( 0 );
                 }
             }
             else {
+                // range/index specifier.
                 var e = expression(0);
                 
                 if( token.id === ":" ) { 
-                    range = token;
-                    range.id = ":";
-                    range.arity = "binary";
+                    // range specifier
+                    this.fromIndex = e;
+                    this.toIndex = null;
+                    this.type = "RangeExpression";
                     
                     advance( ":" );
-                    
-                    range.first = e;
-                    this.second = range;
-                    
+                                        
                     if( token.id !== "]" ) { 
-                        range.second = expression( 0 );
+                        this.toIndex = expression( 0 );
                     }
+
+                    this.type = "RangeExpression";                    
                 }
                 else {
-                    this.second = e;
+                    // index specifier.
+                    this.index = e;
+                    this.type = "IndexExpression";
                 }
             }
 
             this.arity = "binary";
+            var end = token;
             advance("]");
+            
+            this.range = [ this.object.range[0], end.range[1] ];
+            this.loc = { start:  getLocStart( this.object ), end: getLocEnd( end ) };
+
             return this;
     });
 
@@ -8314,13 +9907,16 @@ function make_parser( options ) {
         if (left.id === "." || left.id === "[") {
             // function call on member or index
             this.arity = "binary";
-            this.first = left;
-            this.second = a;
+            this.callee = left;
+            this.arguments = a;
+            this.type = "CallExpression";
         } 
         else {
             this.arity = "binary";
-            this.first = left;
-            this.second = a;
+            this.callee = left;
+            this.arguments = a;
+            this.type = "CallExpression";
+            
             if ((left.arity !== "unary" || left.id !== "function") &&
                     left.arity !== "name" && left.id !== "(" &&
                     left.id !== "&&" && left.id !== "||" && left.id !== "?" && left.id !== '$' && left.id !== '$$' ) {
@@ -8336,19 +9932,18 @@ function make_parser( options ) {
                 advance(",");
             }
         }
+        
+        var end = token;
         advance(")");
+    
+        this.range = [ this.callee.range[0], end.range[1] ];
+        this.loc = { start: getLocStart( this.callee ), end: getLocEnd( end ) };        
+        
         return this;
     });
     
     prefixist("$$");
     prefixist("$");
-
-    /* prefix("not", function () {
-            this.first = expression(70);
-            this.arity = "unary";
-            this.id = "!";
-            return this;
-    } );*/
     
     prefix("!");
     prefix("-");
@@ -8362,6 +9957,11 @@ function make_parser( options ) {
             this.arity = "literal";
             this.value = "#" + token.value;
             this.id = "(literal)";
+            this.type = "ObjRefLiteral";
+            
+            this.range = [ this.range[0], token.range[1] ];
+            this.loc = { start: getLocStart( this ), end: getLocEnd( token ) };        
+            
             advance();
         }
         else { 
@@ -8384,9 +9984,16 @@ function make_parser( options ) {
                 advance(",");
             }
         }
+        
+        var end = token;
         advance("}");
-        this.first = a;
+        
+        this.elements = a;
         this.arity = "unary";
+        this.type = "ListExpression";
+        this.range = [ this.range[0], end.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };        
+        
         return this;
     });
 
@@ -8401,6 +10008,7 @@ function make_parser( options ) {
         return this;
     } );
     
+    // pure grouping...
     prefix("(", function () {
         var e = expression(0);
         advance(")");
@@ -8417,7 +10025,7 @@ function make_parser( options ) {
         
         if ( token.arity === "name") {
             // either return type or name of function
-            tmpRtnType = token;
+            tmpRtnType = token.value;
             advance();
         }
         else {
@@ -8427,7 +10035,7 @@ function make_parser( options ) {
         if ( token.arity === "name" ) {
             // This is the function name.
             this.name = token.value;
-            this.returnType = tmpRtnType;
+            this.returnType = tmpRtnType.value;
             nameToken = token;
             advance();
         }
@@ -8458,33 +10066,33 @@ function make_parser( options ) {
                 
                 varType = token;
                 advance();
+
+                var param = {
+                    "dataType": null,
+                    "name": "", 
+                    "default": null
+                };
                 
                 if( token.arity === 'name' ) { 
-                    // variable name was supplied.
+                    // variable name/type was supplied.
                     varName = token;
-                    varName.dataType = varType;
+                    param.dataType = varType.value;
                     advance();
                 }
                 else {
                     // the varType was actually the name.
                     varName = varType;
-                    // varName.dataType = "dynamic";
                 }
  
                 scope.define(varName);
+                param.name = varName;
                 
                 if (token.id === "=") {
-                    t = token;
                     advance("=");
-                    t.first = varName;
-                    t.second = expression(0);
-                    t.arity = "binary";
+                    param["default"] = expression(0);
                 }
-                else {
-                    t = varName;
-                }
-
-                a.push(t);
+                
+                a.push(param);
                 
                 if (token.id !== ",") {
                     break;
@@ -8492,17 +10100,15 @@ function make_parser( options ) {
                 advance(",");
             }
         }
-        this.first = a;
+        this.params = a;
         advance(")");
 
-        // keep a reference to the first token (end of statement character)
-        this.start = token;
         eos();
 
         this.body = statements();
 
         // keep a reference to the last token
-        this.end = token;
+        var end = token;
         advance("end");
 
         this.arity = "function";
@@ -8511,30 +10117,44 @@ function make_parser( options ) {
         this.eos = token;
         eos();
         
+        this.range = [ this.range[0], end.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };        
+        this.type = "FunctionDeclaration";
+        
         return this;
     });
 
     function declaration( varType ) { 
         var a = [], n, t;
         
+        var declarator = {
+            type: "VariableDeclaration",
+            declarations: a
+        };
+        
         while (true) {
+            // n is name of variable.
             n = token;
             if (n.arity !== "name") {
                 token_error( n,"Expected a new variable name.");
             }
+            
+            t = {
+                type: "VariableDeclarator",
+                name: n,
+                init: null,
+                dataType: varType
+            };
+            
             scope.define(n);
             advance();
+            
             if (token.id === "=") {
-                t = token;
+                // declaration with assignment.
                 advance("=");
-                t.first = n;
-                t.second = expression(0);
-                t.arity = "binary";
+                t.init = expression(0);
             }
-            else {
-                t = n;
-            }
-            t.dataType = varType;
+
             a.push( t );
             
             if (token.id !== ",") {
@@ -8543,8 +10163,13 @@ function make_parser( options ) {
             advance(",");
         }
         
+        var eosToken = token;
         eos();
-        return a.length === 0 ? null : a.length === 1 ? a[0] : a;                
+        
+        declarator.range = [ varType.range[0], eosToken.range[0] ];
+        declarator.loc = { start: getLocStart( varType ), end: getLocStart( eosToken ) };
+        
+        return declarator;          
     }
     
     builtinTypes.forEach( function( varType ) { 
@@ -8552,28 +10177,41 @@ function make_parser( options ) {
     } );
 
     var ifElseIf = function() {
-        this.first = expression(0);
+        this.type = "IfStatement";
+        
+        this.test = expression(0);
         eos();
         
-        this.body = statements();
+        this.consequent = statements();
         skip_newlines();
       
         if ( token.id === "elseif" ) {
-            this.altBody = statement();
             
-            // final 'end' will be matched by original if.
+            // The alternate will be an elseif statement.
+            this.alternate = statement();
+            
             this.arity = "statement";
+            this.range = [ this.range[0], this.alternate.range[1] ];
+            this.loc = { start: getLocStart( this ), end: getLocEnd( this.alternate ) };
+            
+            // final 'end' has already been matched by the elseif.
             return this;
         }
         else if (token.id === "else") {
             advance("else");
             eos();
-            this.altBody = statements();
+
+            // the alternate is an array of zero or more statements.
+            this.alternate = statements();
         } 
         
+        var end = token;
         advance( "end" );
         this.eos = token;
         eos();
+        
+        this.range = [ this.range[0], end.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };
         
         this.arity = "statement";
         return this;
@@ -8584,10 +10222,9 @@ function make_parser( options ) {
 
     stmt("return", function () {
         if( token.id !== "(nl)" ) {
-            this.first = expression(0);
+            this.argument = expression(0);
         } 
         
-        this.eos = token;
         eos();
         
         if ( token.id !== "end" && token.id !== 'elseif' && token.id !== 'else' && token.id !== '(end)' ) {
@@ -8595,6 +10232,10 @@ function make_parser( options ) {
                 token_error( token, "Unreachable statement.");
             }
         }
+        
+        this.range = [ this.range[0], this.argument ? this.argument.range[1] : this.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( this.argument || this ) };
+        this.type = "ReturnStatement";
         this.arity = "statement";
         return this;
     });
@@ -8608,6 +10249,8 @@ function make_parser( options ) {
             }
         }
         this.arity = "statement";
+        this.type = "BreakStatement";
+
         return this;
     });
 
@@ -8617,6 +10260,10 @@ function make_parser( options ) {
         eos();
         
         this.arity = "statement";
+        this.range = [ this.range[0], this.first.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( this.first ) };
+        this.type = "BreakIfStatement";
+
         return this;
     });
 
@@ -8630,6 +10277,7 @@ function make_parser( options ) {
         }
 
         this.arity = "statement";
+        this.type = "ContinueStatement";
         return this;
     });
 
@@ -8639,22 +10287,31 @@ function make_parser( options ) {
         eos();
         
         this.arity = "statement";
+        this.range = [ this.range[0], this.first.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( this.first ) };
+        this.type = "ContinueIfStatement";
+
         return this;
     });
 
     stmt("while", function () {
         
         this.first = expression(0);
-        this.eos = token;
         eos();
         
         this.body = statements();
+
+        var end = token;
         advance("end");
         
         this.eos = token;
         eos();
         
         this.arity = "statement";
+
+        this.range = [ this.range[0], end.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };
+        this.type = "WhileStatement";
         
         return this;
     });
@@ -8672,6 +10329,10 @@ function make_parser( options ) {
         eos();
         
         this.arity = "statement";
+        this.range = [ this.range[0], this.second.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( this.second ) };
+        this.type = "RepeatStatement";
+
         return this;
     });
     
@@ -8695,6 +10356,7 @@ function make_parser( options ) {
             this.body = statements();
 
             this.id = "for_c";
+            this.type = "ForCStyleStatement";            
         }
         else if( token.arity === "name" ) { 
             // for "x in" or for "x = 1 ..."            
@@ -8716,6 +10378,7 @@ function make_parser( options ) {
                 
                 this.body = statements();                
                 this.id = "for";
+                this.type = "ForStatement";            
             }
             else if( token.id === "in" ) { 
                 reverse();
@@ -8724,6 +10387,7 @@ function make_parser( options ) {
                 
                 this.body = statements();
                 this.id = "for_in";
+                this.type = "ForInStatement";            
             }
             else {
                 token_error( token, "Unexpected token.  Expected 'in' or '='." );
@@ -8733,61 +10397,78 @@ function make_parser( options ) {
             token_error( token, "Unexpected token. Expected '(' or a variable name." );
         }
         
+        var end = token;
         advance( "end" );
         this.eos = token;
         eos();
         this.arity = "statement";
+
+        this.range = [ this.range[0], end.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };
+
         return this;
     } );
 
     stmt("switch", function() {
-        this.first = expression(0);
+        this.discriminant = expression(0);
         eos();
 
-        var c, e, s;        
-        this.second = [];
+        var c, e, s, end;        
+        this.cases = [];
         
         while( true ) { 
             if( token.id === "case" ) {
                 c = token;
-                c.first = [];
+                c.test = [];
                 advance( "case" );
 
                 // match 1 or more case values separated by commas.
                 while( true ) { 
                     e = expression(0);
-                    c.first.push( e );
+                    c.test.push( e );
                     if( token.id !== "," ) {
                         break;
                     }
                     advance( "," );
                 }
-                eos();
             }
             else if( token.id === "default" ){ 
                 c = token; 
-                c.first = "default";
+                c.test = null;
                 advance( "default" );
-                eos();
             }
             else break;
 
-            c.second = statements();
+            eos();
+
+            c.consequent = statements();
             c.arity = "binary";
-            this.second.push( c );
             
             // end of case or default
+            end = token;
             advance( "end" );
+            
+            c.type = "SwitchCase";
+            c.range = [ c.range[0], end.range[1] ];
+            c.loc = { start: getLocStart( c ), end: getLocEnd( end ) };
+            
+            this.cases.push( c );
+            
             eos();
         }
                 
         // end of switch
+        end = token;
         advance( "end" );
 
         this.eos = token;
         eos();
 
-        this.arity = "switch";
+        this.arity = "statement";
+        this.range = [ this.range[0], end.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };
+        this.type = "SwitchStatement";
+
         return this;
     });
 
@@ -8824,7 +10505,7 @@ function make_parser( options ) {
             while( ( t = lex.get() ) !== null ) { 
                 tokens.push( t );
             }
-            
+         
             // send through preprocessor...
             tokens = preprocessor.run( tokens );
             
@@ -8861,7 +10542,7 @@ function make_parser( options ) {
 module.exports = make_parser;
 
 
-},{"./lexer":8,"./preprocessor":11,"./util":12}],11:[function(require,module,exports){
+},{"./lexer":13,"./preprocessor":16,"./util":17,"clone":2}],16:[function(require,module,exports){
 // preproccessor.js
 var util = require( './util' ),
     DirectiveStack = require( './directive_stack' ),
@@ -9050,7 +10731,7 @@ module.exports = {
     run: preprocess
 };
 
-},{"./directive_stack":5,"./macros":9,"./util":12}],12:[function(require,module,exports){
+},{"./directive_stack":10,"./macros":14,"./util":17}],17:[function(require,module,exports){
 function flatten(arr) { 
     var numItems = arr.length, i = -1, rtn = [], rIndex = 0;
     while( ++i < numItems ) {
@@ -9116,4 +10797,4 @@ module.exports = {
     isArray: isArray,
     compact: compact
 };
-},{}]},{},[1,3,4,5,6,7,8,9,10,11,12]);
+},{}]},{},[1,8,9,10,11,12,13,14,15,16,17]);
