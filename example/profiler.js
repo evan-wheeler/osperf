@@ -9809,8 +9809,8 @@ function make_parser( options ) {
             var end = token;
             advance( ')' );
 
-            this.range = [ this.object.range[0], end.range[1] ];
-            this.loc = { start:  getLocStart( this.object ), end: getLocEnd( end ) };
+            this.range = [ ( this.object || this ).range[0], end.range[1] ];
+            this.loc = { start:  getLocStart( this.object || this ), end: getLocEnd( end ) };
         }
         else { 
             token.arity = "literal";
@@ -9818,8 +9818,8 @@ function make_parser( options ) {
             this.computed = false;
             advance();
 
-            this.range = [ this.object.range[0], this.property.range[1] ];
-            this.loc = { start:  getLocStart( this.object ), end: getLocEnd( this.property ) };
+            this.range = [ ( this.object || this ).range[0], this.property.range[1] ];
+            this.loc = { start:  getLocStart( this.object || this ), end: getLocEnd( this.property ) };
         }   
         
         this.type = "MemberExpression";
