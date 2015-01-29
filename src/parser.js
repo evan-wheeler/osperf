@@ -798,38 +798,43 @@ function make_parser( options ) {
     // pure grouping...
     prefix("(", function () {
         var e = expression(0);
+        
+        var end = token;
         advance(")");
+        
+        e.range = [ this.range[0], end.range[1] ];
+        e.loc = { start: getLocStart( this ), end: getLocEnd( end ) };        
+        
         return e;
     });
 
     stmt( "function", function () {
         var a = [];
-        var tmpRtnType, nameToken;
+        var token1, nameToken;
         
         new_scope();
         
         // this token can be the return type or the function name...
-        
         if ( token.arity === "name") {
             // either return type or name of function
-            tmpRtnType = token.value;
+            token1 = token;
             advance();
         }
         else {
-            throw "Expected name of function or return type";
+            token_error( token, "Expected name of function or return type" );
         }
         
         if ( token.arity === "name" ) {
-            // This is the function name.
+            // This can only be the function name.
             this.name = token.value;
-            this.returnType = tmpRtnType.value;
+            this.returnType = token1.value;
             nameToken = token;
             advance();
         }
         else { 
-            // no name for function -- assume dynamic return type and the 'return type' token becomes the function name.
-            this.name = tmpRtnType.value;
-            nameToken = tmpRtnType;
+            // no return type for function -- the return type token becomes the function name.
+            this.name = token1.value;
+            nameToken = token1;
         }
         
         // Don't define the function name -- OScript allows defining functions with names of types.
