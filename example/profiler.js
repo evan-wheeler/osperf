@@ -8587,60 +8587,52 @@ var util = require( './util' ),
 function isInstrumented( funcBody ) {
 
     var __fDeclr = {
-            "type": "VariableDeclaration",
-            "declarations": [
-               {
-                  "type": "VariableDeclarator",
-                  "name": {
-                     "id": "(name)",
-                     "value": "__f"
-                  },
-                  "dataType": {
-                     "id": "dynamic",
-                     "value": "Dynamic"
-                  }
-               }
-            ]
-         };
+        "type": "ExpressionStatement",
+        "expression": {
+            "type": "CallExpression",
+            "arguments": [ { "id": "(literal)", }, { "id": "this", "value": "this" } ]
+        }
+    };
 
     return funcBody && funcBody.length && partialCompare( funcBody[0], __fDeclr );
 }
 
-function enterFn( editList, funcID, code, pos ) { 
+function enterFn( editList, fID, code, pos ) { 
     var indentStr = findIndent( code, pos );
-    editList.insert( "Dynamic __f='" + funcID + "'; Object __p=$Pflr;__p.I(__f,this)\n" + indentStr, pos );
+    editList.insert( "$_P.I('" + fID + "',this)\n" + indentStr, pos );
 }
 
-function exitFn( editList, code, pos ) {
-    editList.insert( "\t__p.O(__f)\n", pos ); 
+function exitFn( editList, fID, code, pos ) {
+    var indentStr = findIndent( code, pos );
+    editList.insert( "\n" + indentStr + "$_P.O('" + fID + "')\n", pos + 1 ); 
 } 
 
-function returnFn( editList, code, node ) {
+function returnFn( editList, fID, code, node ) {
     var indentStr = findIndent( code, node.range[0] );
     
     // if the return value is not a simple value, first store it in a temporary variable before returning...
 
     if( isSimpleOp( node.argument ) ) {
-        editList.insert( "__p.O(__f)\n" + indentStr, node.range[0] );
+        editList.insert( "$_P.O('" + fID + "')\n" + indentStr, node.range[0] );
         return;
     }
     
-    //                                     ++++++++++      +++++++++++              ++++++++++++++++++++++++++++++++++++++++++        
-    // convert: "return ( x() * y() )" to "Dynamic __return123131232 = ( x() * y() ); __prf.O(__fid); return __return123131232"
+    /* 
+    Move the result into a temporary before returning.  This will transform a return like this: 
+        return ( x() * y() )
+    into this:
+        Dynamic __return512 = ( x() * y() ); __prf.O(__fid); return __return512
+    */
     
     var returnExprEnd = node.range[1], 
         returnBegin = node.range[0],
         returnEnd = returnBegin + 6,
         rTmpID = "" + returnBegin,
-        tmpVar = "__return" + rTmpID;
-
-    var full_str = code.substring( returnBegin, returnExprEnd + 1 );
-    var return_str = code.substring( returnBegin, returnEnd + 1 );
-    var expr_str = code.substring( returnEnd, returnExprEnd + 1 );
+        tmpVar = "_return" + rTmpID;
 
     editList.insert( rTmpID + "=", returnEnd );
-    editList.insert( "Dynamic __", returnBegin );
-    editList.insert(  "; __p.O(__f); return " + tmpVar, returnExprEnd + 1 );
+    editList.insert( "Dynamic _", returnBegin );
+    editList.insert(  "; $_P.O('" + fID + "'); return " + tmpVar, returnExprEnd + 1 );
 }
 
 function isSimpleOp( node ) { 
@@ -8704,7 +8696,7 @@ function instrument( scriptRefStr, code, parseTree, manglerFn ) {
                 enterFn( editsList, funcID, code, bodyStatements[0].range[0] );
                 
                 // instrument any returns in the body of the function.
-                instrumentReturns( editsList, code, bodyStatements );
+                instrumentReturns( editsList, funcID, code, bodyStatements );
                 
                 var lastStatement = null;
                 
@@ -8714,7 +8706,7 @@ function instrument( scriptRefStr, code, parseTree, manglerFn ) {
                 
                 if( lastStatement !== "return" ) { 
                     // instrument the exit of the function
-                    exitFn( editsList, code, bodyStatements[bodyStatements.length - 1].range[1] );
+                    exitFn( editsList, funcID, code, bodyStatements[bodyStatements.length - 1].range[1] );
                 }
             }
         }
@@ -8725,19 +8717,19 @@ function instrument( scriptRefStr, code, parseTree, manglerFn ) {
     return alreadyInstrumented ? code : editsList.apply();
 }
 
-function instrumentReturns( editList, code, node ) {
+function instrumentReturns( editList, funcID, code, node ) {
     var children = [];
     
     if( node ) {
         if( node.id === "return" ) {                
-            returnFn( editList, code, node );
+            returnFn( editList, funcID, code, node );
             return;
         }
         
         children = util.isArray( node ) ? node : util.compact( [ node.left, node.right, node.body, node.consequent, node.alternate ] );
         
         children.forEach( function( n ) { 
-            instrumentReturns( editList, code, n );
+            instrumentReturns( editList, funcID, code, n );
         } );
     }    
 } 
@@ -10017,32 +10009,31 @@ function make_parser( options ) {
 
     stmt( "function", function () {
         var a = [];
-        var tmpRtnType, nameToken;
+        var token1, nameToken;
         
         new_scope();
         
         // this token can be the return type or the function name...
-        
         if ( token.arity === "name") {
             // either return type or name of function
-            tmpRtnType = token.value;
+            token1 = token;
             advance();
         }
         else {
-            throw "Expected name of function or return type";
+            token_error( token, "Expected name of function or return type" );
         }
         
         if ( token.arity === "name" ) {
-            // This is the function name.
+            // This can only be the function name.
             this.name = token.value;
-            this.returnType = tmpRtnType.value;
+            this.returnType = token1.value;
             nameToken = token;
             advance();
         }
         else { 
-            // no name for function -- assume dynamic return type and the 'return type' token becomes the function name.
-            this.name = tmpRtnType.value;
-            nameToken = tmpRtnType;
+            // no return type for function -- the return type token becomes the function name.
+            this.name = token1.value;
+            nameToken = token1;
         }
         
         // Don't define the function name -- OScript allows defining functions with names of types.
