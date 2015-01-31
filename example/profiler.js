@@ -1,6 +1,6 @@
 (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
-var Parser = require( '../src/parser' ),
-    Lexer = require( '../src/lexer' ),
+var Parser = require( 'bannockburn' ),
+    Lexer = Parser.Lexer,
     instrument = require( '../src/instrument' ),
     coverage = require( '../src/coverage' ),
     _ = require( 'lodash' );
@@ -82,8 +82,8 @@ function go(source) {
         tree = parser.parse( source );
         endTime = performance.now();
 
-        var validValues = [ "type", 'id', 'value', "default", "name", 'operator', 'left', 'right', 'argument', 'init', "test", 'first', 'second', 'third', 'fourth', 'direction', 'label', 'declaration', "dataType",  "kind", "returnType" ];
-        var groupValues = [ "params", "arguments", "body", "consequent", "alternate", "elements", "expression", "declarations", "declarations" ];
+        var validValues = [ "type", 'id', 'value', "default", "name", 'operator', 'left', 'right', 'argument', 'init', "test", 'first', 'second', 'third', 'fourth', 'direction', 'label', 'declaration', "dataType",  "kind", "returnType", "discriminant" ];
+        var groupValues = [ "cases", "params", "arguments", "body", "consequent", "alternate", "elements", "expression", "declarations", "declarations" ];
         
         validValues = validValues.concat( groupValues );
         
@@ -184,7 +184,2092 @@ $( function() {
     
     doParse();
 } );
-},{"../src/coverage":9,"../src/instrument":12,"../src/lexer":13,"../src/parser":15,"lodash":7}],2:[function(require,module,exports){
+},{"../src/coverage":16,"../src/instrument":18,"bannockburn":2,"lodash":14}],2:[function(require,module,exports){
+module.exports = require('./lib/parser');
+},{"./lib/parser":7}],3:[function(require,module,exports){
+function DirectiveStack() { 
+    this._stack = [];
+    this._on = true;
+}
+
+DirectiveStack.prototype = { 
+    push: function( val ) { 
+        if( !val ) { 
+            this._on = false;
+        }
+        this._stack.push( val );
+    },
+    
+    invert: function() { 
+        var i =  this._stack.length - 1;
+        if( i < 0 ) {
+            throw "stack is empty";
+        }
+        this._stack[i] = !this._stack[i];
+        this._on = this._calcOn();
+    },
+    
+    pop: function() { 
+        this._stack.pop();
+        this._on = this._calcOn();
+    },
+    
+    empty: function() {
+        return this._stack.length === 0;
+    },
+    
+    on: function() { 
+        return this._on;
+    },
+    
+    _calcOn: function() {
+        var s = this._stack;
+        var i = s.length; 
+        while( i-- ) { 
+            if( !s[i] ) {
+                return false;
+            }            
+        }   
+        return true;
+    }
+};
+
+module.exports = DirectiveStack;
+},{}],4:[function(require,module,exports){
+
+var opAlternates = {
+    'eq': '=',
+    'lt': '<',
+    'gt': '>',
+    'or': '||',
+    'and': '&&',
+    'xor': '^^',
+    'not': '!'
+};
+
+var reservedWords = [ "and", "or", "not", "eq", "lt", "gt",
+                      "if", "elseif", "for", "switch", "repeat", "while", "end", "function", 
+                      "in", "to", "downto", "default", "case", "return", "break", "breakif", "continueif", "continue" ];
+                      
+var standardTypes = [ "assoc", "boolean", "bytes", "cachetree", "capiconnect", "capierr", "capilog", "capilogin", "dapinode", 
+                        "dapisession", "dapistream", "dapiversion", "date", "dialog", "domattr", "domcdatasection", "domcharacterdata", 
+                        "domcomment", "domdocument", "domdocumentfragment", "domdocumenttype", "domelement", "domentity", "domentityreference", 
+                        "domimplementation", "domnamednodemap", "domnode", "domnodelist", "domnotation", "domparser", "domprocessinginstruction", 
+                        "domtext", "dynamic", "error", "file", "filecopy", "fileprefs", "frame", "integer", "javaobject", "list", "long", 
+                        "mailmessage", "object", "objref", "patchange", "patfind", "pattern", "real", "recarray", "record", "regex", "saxparser", 
+                        "script", "socket", "string", "uapisession", "uapiuser", "ulong", "wapimap", "wapimaptask", "wapisession", "wapisubwork", 
+                        "wapiwork", "xslprocessor"];
+
+module.exports = {
+    builtin_types: standardTypes,
+    reserved_words: reservedWords,
+    op_alternates: opAlternates
+};
+},{}],5:[function(require,module,exports){
+function Lexer( code, options ) { 
+    options = options || {};
+    this.setInput( code || "" );
+}
+
+module.exports = Lexer;
+
+var LINE_COMMENT = 1,
+    BLOCK_COMMENT = 2,
+    SINGLE_STR = 3,
+    DOUBLE_STR = 4,
+    VARIABLE = 5,
+    NUMBER_NO_DECIMAL = 6,
+    NUMBER_DECIMAL = 7,
+    ELLIPSIS = 8,
+    OBJ_LITERAL = 9,
+    WHITESPACE = 10;
+
+function makeToken( t, v, line, from, to, colFrom, colTo ) { 
+    return { 
+        type: t, 
+        value: v, 
+        range: [from, to],
+        loc: { start: { line: line, col: colFrom }, end: { line: line, col: colTo } }
+    };
+}
+    
+Lexer.prototype = { 
+    setInput: function( code ) {
+        this.code = code.replace( /\r\n/g, '\n' ).replace( /\r/g, '\n' );
+        this.line = 1;
+        this.pos = 0;
+        this.linePos = 0;
+        this.done = ( this.code.length === 0 );
+        this.curToken = null;
+        this.indent = "";
+        this.whitespace = []; 
+    },
+    
+    getSource: function() { 
+        return this.code || "";
+    },
+    
+    getWhitespace: function() { 
+        return this.whitespace;
+    },
+    
+    readNextToken: function() { 
+        var result = null,
+            token = "",
+            state = 0,
+            eof = false,
+            eat = false,
+            continuation = false,
+            nlInComment = false,
+            ch = this.code.charAt( this.pos ),
+            ch1 = this.code.charAt( this.pos + 1 ),
+            addCommentNewline = false,
+            from, colFrom, tmpLine = 0;
+        
+        if( ch1 === "" ) { 
+            eof = true;
+            this.pos++;
+            ch1 = '\n';
+        }
+        
+        if( ch !== "" && !this.done ) { 
+            
+            while( true ) {
+                switch( state ) { 
+                case 0:
+                    from = this.pos;
+                    colFrom = this.linePos;
+
+                    // start state 
+                    if( /[_A-Za-z]/.test( ch ) ) {
+                        if( !/[_A-Za-z0-9]/.test( ch1 ) )  { 
+                            result = makeToken( "name", ch, this.line, from, this.pos, colFrom, this.linePos );
+                        }
+                        else { 
+                            state = VARIABLE;
+                            token = ch;
+                        }
+                    }
+                    else if( /[ \t]/.test( ch ) ) { 
+                        if( /[ \t]/.test( ch1 ) ) {
+                            token = ch;
+                            state = WHITESPACE;
+                        }
+                        else {
+                            this.whitespace.push( makeToken( "(ws)", ch, this.line, from, this.pos, colFrom, this.linePos ) );
+                        }
+                    }
+                    else if( ch === ';' ) {
+                        result = makeToken( "(nl)", ch, this.line, from, this.pos, colFrom, this.linePos );
+                    }
+                    else if( ch === '\n' ) {
+                        if( continuation ) {
+                            this.whitespace.push( makeToken( "(nl)", ch, this.line, from, this.pos, colFrom, this.linePos ) );
+
+                            // skip newline.
+                            continuation = false;
+                            token = "";
+                        }
+                        else {
+                            result = makeToken( "(nl)", ch, this.line, from, this.pos, colFrom, this.linePos );
+                        }
+                    }                
+                    else if( ch === '\\' ) { 
+                        continuation = true;
+                        this.whitespace.push( makeToken( "continuation", ch, this.line, from, this.pos, colFrom, this.linePos ) );
+                    } 
+                    else if( ch === "/" && ch1 === "/" ) { 
+                        state = LINE_COMMENT;
+                        token = ch;
+                    }
+                    else if( ch === "/" && ch1 === "*" ) { 
+                        eat = true;
+                        state = BLOCK_COMMENT;
+                        addCommentNewline = false;
+                        nlInComment = false;
+                        token = "/*";
+                    }
+                    else if( ch === "'" ) { 
+                        state = SINGLE_STR;
+                        token = "";
+                    }
+                    else if( ch === '"' ) { 
+                        state = DOUBLE_STR;
+                        token = "";
+                    }
+                    else if( ch === '.' && ch1 === '.' ) { 
+                        state = ELLIPSIS;
+                        token = ".";
+                    }
+                    else if( ch === "." && /[0-9]/.test( ch1 ) ) { 
+                        state = NUMBER_DECIMAL;
+                        token = ch;
+                    }
+                    else if( /[0-9]/.test( ch ) && ch1 === "." ) { 
+                        state = NUMBER_NO_DECIMAL;
+                        token = ch;
+                    }
+                    else if( /[0-9]/.test( ch ) && !/[0-9]/.test( ch1 ) ) { 
+                        result = makeToken( "number", ch, this.line, from, this.pos, colFrom, this.linePos );
+                    }
+                    else if( /[0-9]/.test( ch ) ) { 
+                        state = NUMBER_NO_DECIMAL;
+                        token = ch;
+                    }
+                    else if( ch === '#' && /[0-9]/.test( ch1 ) ) { 
+                        state = OBJ_LITERAL;
+                        token = '#';
+                    }
+                    else if( ch === "$" && ch1 === "$" ) { 
+                        result = makeToken( "operator", "$$", this.line, from, this.pos, colFrom, this.linePos );
+                        eat = true;
+                    }
+                    else if( ch === "$" ) { 
+                        result = makeToken( "operator", "$", this.line, from, this.pos, colFrom, this.linePos );
+                    }
+                    else if( ( "&^|+-*/%<>=!".indexOf( ch ) != -1 && ch1 === "=" ) ||
+                       ( ch === "<" && ch1 === ">" ) || 
+                       ( ch === "<" && ch1 === "<" ) || 
+                       ( ch === ">" && ch1 === ">" ) || 
+                       ( ch === "|" && ch1 === "|" ) ||
+                       ( ch === "&" && ch1 === "&" ) ||
+                       ( ch === "&" && ch1 === "&" ) ||
+                       ( ch === "^" && ch1 === "^" ) ) {
+                        result = makeToken( "operator", ch + ch1, this.line, from, this.pos, colFrom, this.linePos );
+                        eat = true;
+                    }
+                    else if( "#{}/%*,.()[]?:<>!=+-^|&".indexOf( ch ) != -1 ) { 
+                        result = makeToken( "operator", ch, this.line, from, this.pos, colFrom, this.linePos );
+                    }
+                    
+                    break;
+                case 1: // LINE_COMMENT
+                    if( ch1 === '\n' ) {
+                        if( !continuation ) { 
+                            this.whitespace.push( makeToken( "LineComment", token+ch, this.line, from, this.pos, colFrom, this.linePos ) );
+                            result = makeToken( '(nl)', ch1, this.line, from, this.pos, colFrom, this.linePos );
+                        }
+                        else { 
+                            this.whitespace.push( makeToken( "LineComment", token+ch, this.line, from, this.pos, colFrom, this.linePos ) );
+                            this.whitespace.push( makeToken( "(nl)", ch1, this.line, from, this.pos, colFrom, this.linePos ) );
+                        }
+                        
+                        // ignore comments.
+                        eat = true;                    
+                        state = 0;
+                        token = "";
+                    }
+                    else { 
+                        token += ch;
+                    }
+                    break;
+                case 2: // BLOCK COMMENT
+                    if( ch === '*' && ch1 === '/' ) { 
+                        this.whitespace.push( makeToken( "BlockComment", token + "*/", this.line, from, this.pos, colFrom, this.linePos ) );
+                        
+                        // ignore comments.
+                        state = 0;
+                        token = "";
+                        
+                        // We want block comments to add one newline token if it contains a newline.
+                        // However, if it only contains one newline and it was preceded by a continuation token,
+                        // don't add the newline.
+                        if( ( continuation === false && nlInComment ) || addCommentNewline ) {
+                            result = makeToken( '(nl)', "", tmpLine || this.line, from, from, colFrom, colFrom );                    
+                        }
+                        
+                        eat = true;
+                    }
+                    else { 
+                        if( ch === '\n' ) {
+                            if( nlInComment === false ) {
+                                tmpLine = this.line;
+                                from = this.pos; 
+                                colFrom = this.linePos;
+                            }
+                            
+                            // If this is >= second newline, and we're preceded by a continuation, add a newline.
+                            addCommentNewline = continuation && nlInComment;
+                            nlInComment = true;
+                        }
+                        token += ch;
+                    }
+                    break;
+                case 3: // SINGLE_STR 
+                    if( ch === "'" && ch1 === "'" ) {   
+                        token += "'";
+                        eat = true;
+                    }
+                    else if( ch === "'" ) { 
+                        result = makeToken( 'string', token, this.line, from, this.pos, colFrom, this.linePos );
+                    }
+                    else { 
+                        token += ch;
+                    }
+                    break;                
+                case 4: // DOUBLE_STR -- first ch will not be '"'
+                    if( ch === '"' && ch1 === '"' ) {   
+                        token += '"';
+                        eat = true;
+                    }
+                    else if( ch === '"' ) { 
+                        result = makeToken( 'string', token, this.line, from, this.pos, colFrom, this.linePos );
+                    }
+                    else { 
+                        token += ch;
+                    }
+                    break;                
+                case 5: // VARIABLE
+                    token += ch;
+                    
+                    if( !/[_A-Za-z0-9]/.test( ch1 ) ) { 
+                        result = makeToken( 'name', token, this.line, from, this.pos, colFrom, this.linePos );
+                    }
+                    break;
+                case 6: // NUMBER_NO_DECIMAL
+                    if( ch === '.'  ) { 
+                        if( /[0-9]/.test( ch1 ) ) {
+                            token += '.';
+                            state = NUMBER_DECIMAL;
+                        }
+                        else {
+                            result = makeToken( 'number', token, this.line, from, this.pos, colFrom, this.linePos );
+                        }
+                    }
+                    else if( !/[.0-9]/.test( ch1 ) ) {
+                        result = makeToken( 'number', token + ch, this.line, from, this.pos, colFrom, this.linePos );
+                    }
+                    else {
+                        token += ch;
+                    }                    
+                    break;
+                case 7: // NUMBER_DECIMAL 
+                    if( !/[0-9]/.test( ch1 ) ) {
+                        result = makeToken( 'number', token + ch, this.line, from, this.pos, colFrom, this.linePos );
+                    }
+                    else {
+                        token += ch;
+                    }                    
+                    break;                
+                case 8: // ELLIPSIS
+                    token += ch;
+                    
+                    if( ch1 != '.' ) { 
+                        if( token != '...' ) { 
+                            token = "...";
+                        }
+                        result = makeToken( 'operator', token, this.line, from, this.pos, colFrom, this.linePos );
+                    }
+                    break;
+                case 9: // OBJ_LITERAL  -- #F1A981C3
+                    token += ch;
+                    
+                    if( !/[0-9a-fA-F]/.test( ch1 ) ) { 
+                        result = makeToken( 'objref', token, this.line, from, this.pos, colFrom, this.linePos );
+                    }
+                    break;
+                case 10: // WHITESPACE
+                    token += ch;
+                    
+                    if( !/[ \t]/.test( ch1 ) ) { 
+                        this.whitespace.push( makeToken( '(ws)', token, this.line, from, this.pos, colFrom, this.linePos ) );
+                        state = 0;
+                    }
+                    break;
+                }
+               
+                if( eof ) {
+                    this.pos++; break;
+                }
+                
+                this.linePos++;
+                
+                // keep track of lines.
+                if( ch === '\n' ) { 
+                    this.line++; this.linePos = 0; 
+                }
+
+                if( eat ) { 
+                    this.linePos += 1;
+                    
+                    // consume the whole lookahead and keep track of lines.
+                    if( ch1 === '\n' ) { 
+                        this.line++; 
+                        this.linePos = 0; 
+                    }
+                     
+                    this.pos += 2;
+                    ch = this.code.charAt( this.pos );
+                }
+                else {
+                    this.pos++;
+                    ch = ch1;
+                }
+                
+                if( result ) {             
+                    // if we have a result now, just exit.
+                    break;
+                }
+                
+                // update lookahead.
+                ch1 = this.code.charAt( this.pos + 1 );
+
+                // check for eof conditions.
+                if( ch === "" ) { 
+                    // we must have consumed the lookahead and ran into the eof.
+                    break;
+                }
+                else if( ch1 === "" ) { 
+                    // lookahead is eof -- process one more character (set lookahead to newline).
+                    eof = true;
+                    ch1 = '\n';
+                }
+                eat = false;
+            }
+        }
+        
+        if( ( !this.done && result === null ) ) {
+            this.done = true;
+        }
+        
+        return result;            
+    },
+        
+    get: function() { 
+        var rtn = null;
+        if( this.curToken ) {
+            rtn = this.curToken;
+            this.curToken = null;
+        }
+        else { 
+            rtn = this.readNextToken();
+        }
+        return rtn;
+    },
+    
+    peek: function() { 
+        if( !this.curToken ) {
+            this.curToken = this.readNextToken();
+        }
+        return this.curToken;
+    }
+};
+
+},{}],6:[function(require,module,exports){
+var _ = require( 'lodash' );
+
+function identity(v) { return v; }
+function yes() { return true; } 
+
+function Macros( options ) {
+    options = options || {};
+    
+    this.valueFn = options.valueFn || identity;
+    this.canEvalItem = options.canEvalItem || yes;
+
+    this.defTable = {};
+}
+
+Macros.prototype = {
+    isDefined: function( name ) {
+        var n = this.valueFn( name );
+        return typeof this.defTable[n] !== 'undefined';
+    },
+    
+    undef: function( name ) {
+        var n = this.valueFn( name );
+        delete this.defTable[n];
+        return this;
+    },
+    
+    define: function( name, values ) {
+        var n = this.valueFn( name );
+        this.defTable[n] = values;
+        return this;
+    },
+    
+    evaluate: function( name ) { 
+        return this._eval( name, {} );
+    },
+    
+    _eval: function( name, visited ) {
+        var n = this.valueFn( name );
+
+        if( visited[n] ) { 
+            throw { 
+                message: "Recursive macro definition", 
+                name: name 
+            };
+        }        
+        visited[n] = true;
+        
+        var macroVals = this.defTable[n],
+            results = [];
+        
+        if( typeof macroVals !== 'undefined' ) { 
+
+            if( !_.isArray( macroVals ) ) {
+                macroVals = [ macroVals ];
+            }
+                    
+            var temp = macroVals.map( function( val, k ) {
+                return this.canEvalItem(val) && this.isDefined( val ) ?     
+                        this._eval( val, visited ) : val;
+                }, this );
+            
+            var i = -1, len = temp.length;
+            while( ++i < len ) { 
+                var a = temp[i];
+                if( !_.isArray( a ) ) { 
+                    results.push( a );
+                }
+                else {  
+                    results.push.apply( results, a );
+                }
+            }
+        }
+        
+        return results;
+    }
+};
+
+module.exports = Macros;
+},{"lodash":14}],7:[function(require,module,exports){
+var Lexer = require( './lexer' ),
+    _ = require( 'lodash' ),
+    preprocessor = require( './preprocessor' ),
+    language_features = require( './language_features' ),
+    clone = require( 'clone' );
+
+/**
+ * Expose `makeParser()`.
+ */
+exports = module.exports = makeParser;
+
+/**
+ * Expose preprocessor
+ */
+exports.preprocessor = preprocessor;
+
+/**
+ * Expose constructors.
+ */
+exports.Lexer = Lexer;
+    
+/**
+ * Make a new parser.
+ * @return {object}
+ */    
+function makeParser( options ) {
+    "use strict";
+
+    var whitespace = [], 
+        lex = null,
+        scope,
+        symbol_table = {},
+        token,
+        tokens,
+        token_nr,
+        NL = "(nl)";
+
+    /* Add operators here to assign special types,
+        otherwise they will use BinaryExpression
+        or UnaryExpression by default.
+    */
+    var operatorType = {
+        '||': 'LogicalExpression',
+        '&&': 'LogicalExpression',
+        '^^': 'LogicalExpression',
+        '==': 'RelationalExpression',    
+        '<': 'RelationalExpression',    
+        '<=': 'RelationalExpression',    
+        '>=': 'RelationalExpression',    
+        '>': 'RelationalExpression'    
+    };
+    
+    if( !options ) { 
+        options = { 
+            unreachable_code_errors: false,
+            additional_types: [] 
+        };
+    }
+
+    var builtinTypes = language_features.builtin_types,
+        reservedWords = language_features.reserved_words,
+        opAlternates = language_features.op_alternates;
+    
+    if( options.additional_types && options.additional_types.length ) { 
+        builtinTypes = _.union( builtinTypes, options.additional_types.map( function( f ) { return f.toLowerCase(); } ) );
+    }
+
+    var itself = function () {
+        return this;
+    };
+
+    function skip_newlines() { 
+        while( token.arity === NL ) {
+            advance( NL );
+        }
+    }
+
+    function eos() { 
+        advance( NL );
+        skip_newlines();
+    }
+
+    var token_error = function ( t, message ) {
+        t.type = "SyntaxError";
+        t.message = message;
+        throw t;
+    };    
+    
+    var original_scope = {
+        define: function ( n ) {
+            var v = n.value.toLowerCase();
+            var t = this.def[v];
+            
+            if( _.indexOf( reservedWords, v ) > -1 ) {
+                token_error( n, n.value + ' not expected here.' );
+            }
+            
+            this.def[v] = n;
+            n.reserved = false;
+            n.nud      = itself;
+            n.led      = null;
+            n.std      = null;
+            n.lbp      = 0;
+            n.scope    = scope;
+            
+            return n;
+        },
+        
+        find: function (n) {
+            // n is already lowercase...
+            var e = this, o;
+            while (true) {
+                o = e.def[n];
+                if (o && typeof o !== 'function') {
+                    return e.def[n];
+                }
+                e = e.parent;
+                if (!e) {
+                    o = symbol_table[n];
+                    return o && typeof o !== 'function' ? o : symbol_table["(name)"];
+                }
+            }
+        },
+        
+        pop: function () {
+            scope = this.parent;
+        },
+        
+        reserve: function (n) {
+            if (n.arity !== "name" || n.reserved) {
+                return;
+            }            
+            var v = n.value.toLowerCase();
+            
+            var t = this.def[v];
+            if (t) {
+                if (t.reserved) {
+                    return;
+                }
+                if (t.arity === "name") {
+                    token_error(n, "Already defined.");
+                }
+            }
+            this.def[v] = n;
+            n.reserved = true;
+        }
+    };
+
+    function new_scope() {
+        var s = scope;
+        scope = Object.create(original_scope);
+        scope.def = {};
+        scope.parent = s;
+        return scope; 
+    }
+    
+    /**
+     * Pushes last token back -- reverses advance()
+     */
+    function reverse() { 
+        token_nr -= 2;
+        advance();
+    }
+    
+    /**
+     * Advances the token.
+     * @param {string} [id] - ID to match.
+     */
+    function advance( id ) {
+        var a, o, t, v, vl, alt, assignType = null;
+        
+        if (id && token.id !== id) {
+            token_error( token, "Expected '" + id + "'.");
+        }
+        
+        if (token_nr >= tokens.length) {
+            token = symbol_table["(end)"];
+            return;
+        }
+        
+        t = tokens[token_nr];
+        token_nr++;
+        
+        v = t.value;
+        a = t.type;
+        vl = v.toLowerCase();
+        alt = opAlternates[vl];
+        
+        // check for operator alternates...
+        if( a === "name" && alt ) { 
+            a = 'operator';
+            vl = alt;
+        }
+        
+        switch( a ) { 
+        case "name":
+            if( _.indexOf( builtinTypes, vl ) !== -1 ) { 
+                o = scope.find(vl);
+                
+                if( o === symbol_table["(name)"] ) { 
+                    o = symbol_table[vl];
+                    a = "name";
+                }
+            }
+            else { 
+                o = scope.find(vl);
+            }
+            break;
+        case "operator":
+            o = symbol_table[vl];
+            if (!o) {
+                token_error( t, "Unknown operator.");
+            }
+            break;
+        case "string": case "number": 
+            o = symbol_table["(literal)"];
+            a = "literal";
+            break;
+        case "objref":
+            o = symbol_table["(literal)"];
+            a = "literal";
+            assignType = "ObjRefLiteral";
+            break;
+        case NL:
+            o = symbol_table[a];
+            break;
+        default:
+            token_error( t, "Unexpected token.");
+        }
+        
+        // create an object from the type defined in the symbol table.
+        token = Object.create(o);
+        token.range = clone( t.range );
+        token.loc = clone( t.loc );
+        token.value = v;
+        token.arity = a;
+        
+        if( assignType ) { 
+            token.type = assignType;
+        }
+                        
+        return token;
+    }
+
+    var expression = function (rbp) {
+        var left;
+        var t = token;
+        
+        // We shouldn't find statement reserved words here...
+        if( t.std && t.reservedWord ) {
+            token_error( t, t.value + " not expected here." );
+        }
+        
+        advance();
+        left = t.nud();
+        while (rbp < token.lbp ) {
+            t = token;
+            advance();
+            left = t.led(left);
+        }
+        return left;
+    };
+
+    var statement = function () {
+        var n = token, v, eosTok;
+        
+        // try to match labels...
+        if( n.arity === 'name' ) { 
+            advance();
+            
+            if( token.id === ':' ) { 
+                advance( ":" );
+                scope.define( n );  // this also prevents reserved words from being labels.
+                n.label = true;
+                skip_newlines();
+                return n;
+            }
+            
+            if( _.indexOf( builtinTypes, n.value.toLowerCase() ) > -1 ) { 
+                // if the next character is a name, this is probably a declaration.
+                if( token.arity === "name" ) { 
+                    return declaration( n );
+                }
+                else if( token.id === NL ) { 
+                    // a variable type is allowed to be alone on a line --- essentially a noop.
+                    eos();
+                    
+                    return { 
+                        type: "ExpressionStatement",
+                        range: n.range,
+                        loc: n.loc,
+                        expression: n,
+                        arity: "statement"
+                    };
+                }
+            }
+            
+            // reverse and parse as a statement or an expression.
+            reverse();
+        }
+        
+        // if our token has a std function it is one of our statements.
+        if (n.std) {
+            advance();
+            return n.std();
+        }
+
+        // anything else will be a statement expression
+        return statementExpression();
+    };
+    
+    var statementExpression = function( ) {
+        var v = expression(0);
+
+        eos();
+        
+        // if it's an expression statement, wrap it in an EpressionStatement.
+        return { 
+            type: "ExpressionStatement",
+            range: [ v.range[0], v.range[1] ],
+            loc: { start: v.loc.start, end: v.loc.end },
+            expression: v,
+            arity: "statement"
+        };    
+    };
+
+    var statements = function () {
+        var a = [], s;
+        while (true) {
+            if (token.id === "end" || token.id === "(end)" || token.id === 'else' || token.id === 'elseif' || token.id === 'until' ) {
+                break;
+            }
+            s = statement();
+            if (s) {
+                a.push(s);
+            }
+        }
+        
+        if( a.length === 0 ) { 
+            a = null;
+        }
+        return a;
+    };
+
+    var original_symbol = {
+        nud: function () {
+            if( this.arity === 'name' ) {
+                // console.warn( "%s was not defined", this.value );
+                return this;
+            }
+
+            token_error( this, "Error parsing this statement.");
+        },
+        led: function (left) {
+            token_error( this,"Missing operator.");
+        }
+    };
+
+    var symbol = function (id, bp) {
+        var s = symbol_table[id];
+        bp = bp || 0;
+        if (s) {
+            if (bp >= s.lbp) {
+                s.lbp = bp;
+            }
+        } else {
+            s = Object.create(original_symbol);
+            s.id = s.value = id;
+            s.lbp = bp;
+            symbol_table[id] = s;
+        }
+        return s;
+    };
+    
+    var getLocStart = function( ref ) {
+        if( ref && ref.loc ) {
+            return ref.loc.start;
+        }
+        return null;
+    };
+
+    var getLocEnd = function( ref ) {
+        if( ref && ref.loc ) {
+            return ref.loc.end;
+        }
+        return null;
+    };
+    
+    var constant = function (s, v) {
+        var x = symbol(s);
+        x.nud = function () {
+            scope.reserve(this);
+            this.value = symbol_table[this.id].value;
+            this.arity = "literal";
+            return this;
+        };
+        x.value = v;
+        return x;
+    };
+    
+    var infix = function (id, bp, led) {
+        var s = symbol(id, bp);
+        s.led = led || function (left) {
+        
+            this.left = left;
+            this.right = expression(bp);
+            this.arity = "binary";
+            this.type = operatorType[id] || "BinaryExpression";
+            this.operator = this.id;
+            
+            this.range = [ this.left.range[0], this.right.range[1] ];
+            this.loc = { start: getLocStart( this.left ), end: getLocEnd( this.right ) };
+            
+            return this;
+        };
+        return s;
+    };
+
+    var infixr = function (id, bp, led) {
+        var s = symbol(id, bp);
+        s.led = led || function (left) {
+        
+            this.left = left;
+            this.right = expression(bp - 1);
+            this.arity = "binary";
+            this.type = operatorType[id] || "BinaryExpression";
+            this.operator = this.id;
+            
+            this.range = [ this.left.range[0], this.right.range[1] ];
+            this.loc = { start:  getLocStart( this.left ), end: getLocEnd( this.right ) };
+
+            return this;
+        };
+        return s;
+    };
+
+    var assignment = function (id) {
+        return infixr(id, 10, function (left) {
+            if (left.id !== "." && left.id !== "[" && left.id !== '$' && left.id !== '$$' && left.arity !== "name" ) {
+                token_error( left,"Bad lvalue.");
+            }
+            this.left = left;
+            this.right = expression(9);
+            this.assignment = true;
+            this.arity = "binary";
+
+            this.type = "AssignmentExpression";
+            this.operator = this.id;
+            
+            this.range = [ this.left.range[0], this.right.range[1] ];
+            this.loc = { start:  getLocStart( this.left ), end: getLocEnd( this.right ) };
+            
+            return this;
+        });
+    };
+
+    var prefix = function (id, nud) {
+        var s = symbol(id);
+        s.nud = nud || function () {
+            scope.reserve(this);
+            this.argument = expression(70);
+            this.arity = "unary";
+            this.type = operatorType[id] || "UnaryExpression";
+            this.operator = this.id;
+            this.prefix = true;
+            this.range = [ this.range[0], this.argument.range[1] ];
+            this.loc = { start:  getLocStart( this ), end: getLocEnd( this.argument ) };
+
+            return this;
+        };
+        return s;
+    };
+
+    var prefix2 = function (id, nud) {
+        var s = symbol(id);
+        s.nud = nud || function () {
+            scope.reserve(this);
+            this.argument = expression(90);
+            this.arity = "unary";
+            this.type = operatorType[id] || "UnaryExpression";
+            this.operator = this.id;
+            this.range = [ this.range[0], this.argument.range[1] ];
+            this.loc = { start: getLocStart( this ), end: getLocEnd( this.argument ) };
+            
+            return this;
+        };
+        return s;
+    };
+    
+    var prefix_infix = function( id, bp, nud, led ) {
+        var s = symbol( id, bp );
+        s.nud = nud;
+        s.led = led || nud;
+        return s;
+    };
+        
+    var stmt = function (s, f) {
+        var x = symbol(s);
+        x.nud = function () {
+            scope.reserve(this);
+            this.first = expression(70);
+            this.arity = "unary";
+            return this;
+        };
+        x.std = f;
+        return x;
+    };
+
+    // symbols for all builtin-types
+    builtinTypes.forEach( symbol );
+
+    // add reserved words to the symbol table.
+    reservedWords.forEach( function(r) { 
+        var t = symbol_table[r];
+        if( typeof t === "object" ) { 
+            t.reservedWord = true;
+        }
+    } );
+    
+    // misc symbols
+    symbol(NL );
+    symbol( "end" );
+    symbol("(end)");
+    symbol("(name)");
+    symbol("...");
+    symbol(":");
+    symbol(";");
+    symbol(")");
+    symbol("]");
+    symbol("}");
+    symbol(",");
+    symbol( "else" );
+    symbol( "until" );
+    symbol( "case" );
+    symbol( "default" );
+    symbol( "to" );
+    symbol( "downto" );
+
+    // misc constants.
+    constant( "true", true );
+    constant( "false", false );
+    constant( "undefined", null );
+    
+    // make literals match themselves.
+    symbol("(literal)").nud = itself;
+
+    // this
+    symbol("this").nud = function () {
+        scope.reserve(this);
+        this.arity = "this";
+        this.type = "ThisExpression";
+        return this;
+    };
+
+    /* Operators */
+    assignment("=");
+    assignment("+=");
+    assignment("-=");
+    assignment("*=");
+    assignment("/=");
+    assignment("%=");
+    assignment("&=");
+    assignment("|=");
+    assignment("^=");
+
+    infix("?", 20, function (left) {
+        
+        this.test = left;
+        this.consequent = expression(0);
+        advance(":");
+        this.alternate = expression(0);
+        
+        this.type = "ConditionalExpression";
+        this.arity = "ternary";
+        this.range = [ this.test.range[0], this.alternate.range[1] ];
+        this.loc = { start:  getLocStart( this.test ), end: getLocEnd( this.alternate ) };
+        return this;
+    });
+
+    infixr("&", 15);
+    infixr("|", 15);
+    infixr("^", 15);
+
+    infixr("and", 30);
+    infixr("or", 30);
+    infixr("&&", 30);
+    infixr("||", 30);
+    infixr("^^", 30);
+    
+    infixr("==", 40);
+    infixr("!=", 40);
+    infixr("<>", 40);
+    infixr("<", 40);
+    infixr("<=", 40);
+    infixr(">", 40);
+    infixr(">=", 40);
+
+    infixr( "<<", 45 );
+    infixr( ">>", 45 );    
+
+    infix( "in", 50 );
+
+    infix("+", 50);
+    infix("-", 50);
+    infix("*", 60);
+    infix("/", 60);
+    infix("%", 60);
+    
+    prefix_infix( ".", 80, function (left) {
+        // infix version.
+        this.object = left || null;
+        if (token.id == '(' ) {
+            advance( '(' );
+            this.property = expression( 10 );
+            this.computed = true;
+            
+            var end = token;
+            advance( ')' );
+
+            this.range = [ ( this.object || this ).range[0], end.range[1] ];
+            this.loc = { start:  getLocStart( this.object || this ), end: getLocEnd( end ) };
+        }
+        else { 
+            token.arity = "literal";
+            this.property = token;
+            this.computed = false;
+            advance();
+
+            this.range = [ ( this.object || this ).range[0], this.property.range[1] ];
+            this.loc = { start:  getLocStart( this.object || this ), end: getLocEnd( this.property ) };
+        }   
+        
+        this.type = "MemberExpression";
+        this.arity = "binary";
+        return this;
+    } );
+
+    prefix_infix( "[", 80, function () {
+            var name = "", start = token;
+            
+            while( token.id === '.' || token.arity === 'name' ) { 
+                name += token.value;
+                advance();
+            }
+            
+            var end = token;
+            advance("]");
+            
+            this.first = name;
+            this.id = "xlate";
+            this.arity = "unary";
+            this.type = "XLateExpression";
+            this.range = [ start.range[0], end.range[1] ];
+            this.loc = { start:  getLocStart( start ), end: getLocEnd( end ) };
+            
+            return this;
+        }, 
+        
+        function (left) {
+
+            // first should resolve to some object.
+            this.object = left;
+
+            var range = clone( this );
+
+            if( token.id === ':' ) { 
+                // range specifier with empty start index.
+
+                this.fromIndex = null;
+                this.toIndex = null;
+                this.type = "RangeExpression";
+                
+                advance( ":" );
+                
+                if( token.id !== "]" ) { 
+                    this.toIndex = expression( 0 );
+                }
+            }
+            else {
+                // range/index specifier.
+                var e = expression(0);
+                
+                if( token.id === ":" ) { 
+                    // range specifier
+                    this.fromIndex = e;
+                    this.toIndex = null;
+                    this.type = "RangeExpression";
+                    
+                    advance( ":" );
+                                        
+                    if( token.id !== "]" ) { 
+                        this.toIndex = expression( 0 );
+                    }
+
+                    this.type = "RangeExpression";                    
+                }
+                else {
+                    // index specifier.
+                    this.index = e;
+                    this.type = "IndexExpression";
+                }
+            }
+
+            this.arity = "binary";
+            var end = token;
+            advance("]");
+            
+            this.range = [ this.object.range[0], end.range[1] ];
+            this.loc = { start:  getLocStart( this.object ), end: getLocEnd( end ) };
+
+            return this;
+    });
+
+    infix("(", 80, function (left) {
+        var a = [];
+        if (left.id === "." || left.id === "[") {
+            // function call on member or index
+            this.arity = "binary";
+            this.callee = left;
+            this.arguments = a;
+            this.type = "CallExpression";
+        } 
+        else {
+            this.arity = "binary";
+            this.callee = left;
+            this.arguments = a;
+            this.type = "CallExpression";
+            
+            if ((left.arity !== "unary" || left.id !== "function") &&
+                    left.arity !== "name" && left.id !== "(" &&
+                    left.id !== "&&" && left.id !== "||" && left.id !== "?" && left.id !== '$' && left.id !== '$$' ) {
+                token_error( left,"Expected a variable name.");
+            }
+        }
+        if (token.id !== ")") {
+            while (true) {
+                a.push(expression(0));
+                if (token.id !== ",") {
+                    break;
+                }
+                advance(",");
+            }
+        }
+        
+        var end = token;
+        advance(")");
+    
+        this.range = [ this.callee.range[0], end.range[1] ];
+        this.loc = { start: getLocStart( this.callee ), end: getLocEnd( end ) };        
+        
+        return this;
+    });
+    
+    prefix2("$$");
+    prefix2("$");
+    
+    prefix("!");
+    prefix("-");
+    
+    prefix( "#", function() { 
+        // this is a special case where the following 
+        // identifier should be treated as a literal
+        // hex value.
+        
+        if( token.arity === "name" && /^[a-fA-F0-9]+$/.test( token.value ) ) { 
+            this.arity = "literal";
+            this.value = "#" + token.value;
+            this.id = "(literal)";
+            this.type = "ObjRefLiteral";
+            
+            this.range = [ this.range[0], token.range[1] ];
+            this.loc = { start: getLocStart( this ), end: getLocEnd( token ) };        
+            
+            advance();
+        }
+        else { 
+            token_error( token, "Expected hexadecimal value" );
+        }
+        
+        return this;
+    } );
+    
+    prefix("{", function () {
+        var a = [];
+        if (token.id !== "}") {
+            while (true) {
+                a.push(expression(0));
+                if (token.id !== ",") {
+                    break;
+                }
+                advance(",");
+            }
+        }
+        
+        var end = token;
+        advance("}");
+        
+        this.elements = a;
+        this.arity = "unary";
+        this.type = "ListExpression";
+        this.range = [ this.range[0], end.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };        
+        
+        return this;
+    });
+    
+    // () grouping...
+    prefix("(", function () {
+        var e = expression(0);
+        
+        var end = token;
+        advance(")");
+        
+        e.range = [ this.range[0], end.range[1] ];
+        e.loc = { start: getLocStart( this ), end: getLocEnd( end ) };        
+        
+        return e;
+    });
+
+    /* Statements */
+    
+    stmt( "function", function () {
+        var a = [];
+        var token1, nameToken;
+        
+        new_scope();
+        
+        // this token can be the return type or the function name...
+        if ( token.arity === "name") {
+            // either return type or name of function
+            token1 = token;
+            advance();
+        }
+        else {
+            token_error( token, "Expected name of function or return type" );
+        }
+        
+        if ( token.arity === "name" ) {
+            // This can only be the function name.
+            this.name = token.value;
+            this.returnType = token1.value;
+            nameToken = token;
+            advance();
+        }
+        else { 
+            // no return type for function -- the return type token becomes the function name.
+            this.name = token1.value;
+            nameToken = token1;
+        }
+        
+        // Don't define the function name -- OScript allows defining functions with names of types.
+        // scope.define( nameToken );
+        
+        // arguments...
+        advance("(");
+        if (token.id !== ")") {
+            while (true) {
+                if( token.arity === 'operator' && token.value === '...' ) { 
+                    // this must be the last argument.
+                    a.push(token);
+                    advance();
+                    break;
+                }
+                else if ( token.arity !== "name") {
+                    token_error( token,"Expected a parameter definition.");
+                }
+                
+                var varName, varType, t; 
+                
+                varType = token;
+                advance();
+
+                var param = {
+                    "dataType": null,
+                    "name": "", 
+                    "default": null
+                };
+                
+                if( token.arity === 'name' ) { 
+                    // variable name/type was supplied.
+                    varName = token;
+                    param.dataType = varType.value;
+                    advance();
+                }
+                else {
+                    // the varType was actually the name.
+                    varName = varType;
+                }
+ 
+                scope.define(varName);
+                param.name = varName;
+                
+                if (token.id === "=") {
+                    advance("=");
+                    param["default"] = expression(0);
+                }
+                
+                a.push(param);
+                
+                if (token.id !== ",") {
+                    break;
+                }
+                advance(",");
+            }
+        }
+        this.params = a;
+
+        advance(")");
+        eos();
+        
+        this.body = statements();
+
+        var end = token;
+        advance("end");
+        eos();
+
+        scope.pop();
+        
+        this.type = "FunctionDeclaration";
+        this.arity = "function";
+        this.range = [ this.range[0], end.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };        
+        
+        return this;
+    });
+
+    function declaration( varType ) { 
+        var a = [], n, t, last;
+        
+        var declarator = {
+            type: "VariableDeclaration",
+            declarations: a
+        };
+        
+        while (true) {
+            // n is name of variable.
+            n = last = token;
+            if (n.arity !== "name") {
+                token_error( n,"Expected a new variable name.");
+            }
+            
+            t = {
+                type: "VariableDeclarator",
+                name: n,
+                init: null,
+                dataType: varType
+            };
+
+            scope.define(n);
+            advance();
+            
+            if (token.id === "=") {
+                // declaration with assignment.
+                advance("=");
+                t.init = expression(0);
+                last = t.init;
+            }
+
+            a.push( t );
+            
+            if (token.id !== ",") {
+                break;
+            }
+            advance(",");
+        }
+        
+        var eosToken = token;
+        eos();
+        
+        declarator.range = [ varType.range[0], last.range[1] ];
+        declarator.loc = { start: getLocStart( varType ), end: getLocEnd( last ) };
+        
+        return declarator;          
+    }
+
+    var ifElseIf = function() {
+        this.type = "IfStatement";
+        
+        this.test = expression(0);
+        eos();
+        
+        this.consequent = statements();
+        skip_newlines();
+      
+        if ( token.id === "elseif" ) {
+            
+            // The alternate will be an elseif statement.
+            this.alternate = statement();
+            
+            this.arity = "statement";
+            this.range = [ this.range[0], this.alternate.range[1] ];
+            this.loc = { start: getLocStart( this ), end: getLocEnd( this.alternate ) };
+            
+            // final 'end' has already been matched by the elseif.
+            return this;
+        }
+        else if (token.id === "else") {
+            advance("else");
+            eos();
+
+            // the alternate is an array of zero or more statements.
+            this.alternate = statements();
+        } 
+        
+        var end = token;
+        advance( "end" );
+        eos();
+        
+        this.range = [ this.range[0], end.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };
+        
+        this.arity = "statement";
+        return this;
+    };
+     
+    stmt( "if", ifElseIf );
+    stmt( "elseif", ifElseIf ); 
+
+    stmt("return", function () {
+        if( token.id !== NL ) {
+            this.argument = expression(0);
+        } 
+        
+        eos();
+        
+        if ( token.id !== "end" && token.id !== 'elseif' && token.id !== 'else' && token.id !== '(end)' ) {
+            if( options.unreachable_code_errors ) { 
+                token_error( token, "Unreachable statement.");
+            }
+        }
+        
+        this.range = [ this.range[0], this.argument ? this.argument.range[1] : this.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( this.argument || this ) };
+        this.type = "ReturnStatement";
+        this.arity = "statement";
+        return this;
+    });
+
+    stmt("break", function () {
+        eos();
+
+        if ( token.id !== "end" && token.id !== 'elseif' && token.id !== 'else' && token.id !== '(end)' ) {
+            if( options.unreachable_code_errors ) { 
+                token_error( token,"Unreachable statement.");
+            }
+        }
+        this.arity = "statement";
+        this.type = "BreakStatement";
+
+        return this;
+    });
+
+    stmt("breakif", function () {
+        this.argument = expression( 0 );
+        eos();
+        
+        this.arity = "statement";
+        this.range = [ this.range[0], this.argument.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( this.argument ) };
+        this.type = "BreakIfStatement";
+
+        return this;
+    });
+
+    stmt("continue", function () {
+        eos();
+
+        if ( token.id !== "end" && token.id !== 'elseif' && token.id !== 'else' && token.id !== '(end)' ) {
+            if( options.unreachable_code_errors ) {
+                token_error( token,"Unreachable statement.");
+            }
+        }
+
+        this.arity = "statement";
+        this.type = "ContinueStatement";
+        return this;
+    });
+
+    stmt("continueif", function () {
+        this.argument = expression( 0 );
+        eos();
+        
+        this.arity = "statement";
+        this.range = [ this.range[0], this.argument.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( this.argument ) };
+        this.type = "ContinueIfStatement";
+
+        return this;
+    });
+
+    stmt("while", function () {
+        
+        this.test = expression(0);
+        eos();
+        
+        this.body = statements();
+
+        var end = token;
+        advance("end");
+        
+        eos();
+        
+        this.arity = "statement";
+
+        this.range = [ this.range[0], end.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };
+        this.type = "WhileStatement";
+        
+        return this;
+    });
+
+    stmt("repeat", function () {
+        eos();
+
+        this.body = statements();
+        
+        advance("until");
+        
+        this.second = expression(0);
+        
+        eos();
+        
+        this.arity = "statement";
+        this.range = [ this.range[0], this.second.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( this.second ) };
+        this.type = "RepeatStatement";
+
+        return this;
+    });
+    
+    stmt( "for", function() { 
+    
+        if( token.id === '(' ) { 
+            advance( '(' );
+
+            // c-style for loop.
+            this.first = ( token.id !== NL ) ? expression(0) : null;
+            advance( NL );
+
+            this.second = ( token.id !== NL ) ? expression(0) : null;
+            advance( NL );
+
+            this.third = ( token.id !== ')' ) ? expression(0) : null;
+                        
+            advance( ')' );
+            eos();
+
+            this.body = statements();
+
+            this.id = "for_c";
+            this.type = "ForCStyleStatement";            
+        }
+        else if( token.arity === "name" ) { 
+            // for "x in" or for "x = 1 ..."            
+            
+            this.first = token;
+            advance();
+            
+            if( token.id === "=" ) { 
+                advance( '=' );
+                this.second = expression(0);
+                
+                if( token.id === 'to' || token.id === 'downto' ) {
+                    this.direction = token;
+                    advance();
+                }
+                
+                this.third = expression(0);
+                eos();
+                
+                this.body = statements();                
+                this.id = "for";
+                this.type = "ForStatement";            
+            }
+            else if( token.id === "in" ) { 
+                reverse();
+                this.first = expression( 0 );
+                eos();
+                
+                this.body = statements();
+                this.id = "for_in";
+                this.type = "ForInStatement";            
+            }
+            else {
+                token_error( token, "Unexpected token.  Expected 'in' or '='." );
+            }
+        }
+        else { 
+            token_error( token, "Unexpected token. Expected '(' or a variable name." );
+        }
+        
+        var end = token;
+        advance( "end" );
+        eos();
+
+        this.arity = "statement";
+
+        this.range = [ this.range[0], end.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };
+
+        return this;
+    } );
+
+    stmt("switch", function() {
+        this.discriminant = expression(0);
+        eos();
+
+        var c, e, s, end;        
+        this.cases = [];
+        
+        while( true ) { 
+            if( token.id === "case" ) {
+                c = token;
+                c.test = [];
+                advance( "case" );
+
+                // match 1 or more case values separated by commas.
+                while( true ) { 
+                    e = expression(0);
+                    c.test.push( e );
+                    if( token.id !== "," ) {
+                        break;
+                    }
+                    advance( "," );
+                }
+            }
+            else if( token.id === "default" ){ 
+                c = token; 
+                c.test = null;
+                advance( "default" );
+            }
+            else break;
+
+            eos();
+
+            c.consequent = statements();
+            c.arity = "binary";
+            
+            // end of case or default
+            end = token;
+            advance( "end" );
+            
+            c.type = "SwitchCase";
+            c.range = [ c.range[0], end.range[1] ];
+            c.loc = { start: getLocStart( c ), end: getLocEnd( end ) };
+            
+            this.cases.push( c );
+            
+            eos();
+        }
+                
+        // end of switch
+        end = token;
+        advance( "end" );
+
+        eos();
+
+        this.arity = "statement";
+        this.range = [ this.range[0], end.range[1] ];
+        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };
+        this.type = "SwitchStatement";
+
+        return this;
+    });
+
+    // hopefully not.
+    stmt( "goto", function() { 
+        if( token.arity === "name" ) { 
+            this.first = token;
+        }
+        else { 
+            token_error( token, "Expected label" );
+        }
+        this.arity = "unary";
+        return this;
+    } );
+    
+    return { 
+        
+        Lexer: Lexer,
+        
+    
+        getTokens: function() { 
+            return tokens;
+        },
+        
+        getSource: function() { 
+            return lex ? lex.getSource() : "";
+        },
+        
+        parse: function parse( source ) {   
+            var t;
+    
+            // reset state
+            scope = null;
+            token = null;
+            tokens = [];
+            token_nr = 0;
+            
+            // Init the lexer and read all the tokens into our token buffer.
+            lex = new Lexer( source );
+            while( ( t = lex.get() ) !== null ) { 
+                tokens.push( t );
+            }
+         
+            // send through preprocessor...
+            tokens = preprocessor.run( tokens );
+            
+            // if the program doesn't end with some kind of end-of-statement character, add one.
+            if( tokens.length > 0 ) { 
+                var lastToken = tokens[tokens.length-1];
+                if( lastToken.type !== NL ) { 
+                    var lastTokenEndPos = lastToken.range[1], 
+                        lastTokLoc = getLocEnd( lastToken );
+                    
+                    tokens.push( { 
+                        type: NL, 
+                        value:'', 
+                        range: [ lastTokenEndPos+1, lastTokenEndPos+1 ], 
+                        loc: { 
+                            start: { line: lastTokLoc.line, col: lastTokLoc.col+1 }, 
+                            end: { line: lastTokLoc.line, col: lastTokLoc.col+1 }
+                        }
+                    } );
+                }
+            }
+                        
+            // init and parse.
+            new_scope();
+            advance();
+            
+            // skip any leading whitespace...
+            skip_newlines();
+                
+            // process all statements.
+            var s = statements();
+
+            advance("(end)");
+            scope.pop();
+            return s;
+        }
+    };
+}
+
+
+
+},{"./language_features":4,"./lexer":5,"./preprocessor":8,"clone":9,"lodash":14}],8:[function(require,module,exports){
+// preproccessor.js
+var DirectiveStack = require( './directive_stack' ),
+    Macros = require( './macros' );
+    
+var token_error = function ( t, message ) {
+    t.type = "SyntaxError";
+    t.message = message || "Unknown or erroneous preproccessor directive";
+    throw t;
+};
+
+var macros,
+    directiveStack,
+    tokens = [],
+    token = null,
+    tokenIndex = 0,
+    findDirective = true,
+    results = [],
+    usingTokens = true;
+
+var advance = function( evalToken ) { 
+    if( token && evalToken && directiveStack.on() ) {
+        if( macros.isDefined( token ) ) { 
+            try {
+                results.push.apply( results, macros.evaluate( token ) );
+            }
+            catch( e ) { 
+                token_error( token, "Recursive macro definition can't be evaluated" );
+            }
+        }
+        else {
+            results.push( token );
+        }
+    }   
+    
+    if( tokenIndex >= tokens.length ) { 
+        token = null;
+        return;
+    }        
+    
+    token = tokens[tokenIndex++];
+};
+
+function isValidMacroName( tok ) { 
+    return tok && tok.type === 'name';
+}
+
+var directives = { 
+    "define": function(t,args) {
+        if( directiveStack.on() ) { 
+            if( isValidMacroName( args[0] ) ) { 
+                macros.define( args[0], args.slice( 1 ) );
+            }
+        }
+    },
+    "undef": function(t,args) { 
+        if( directiveStack.on() ) { 
+            macros.undef( args[0] );
+        }
+    },
+    "ifdef": function(t,args) { 
+        directiveStack.push( macros.isDefined( args[0] ) );
+    },
+    "ifndef": function(t, args ) { 
+        directiveStack.push( !macros.isDefined( args[0] ) );
+    },
+    "else": function(t,args) {             
+        if( directiveStack.empty() ) {
+            token_error(t);
+        }
+        directiveStack.invert();
+    },
+    "endif": function(t,args) { 
+        if( directiveStack.empty() ) {
+            token_error( t );
+        }
+        directiveStack.pop();
+    }
+};
+
+function directive() { 
+    if( token.type === 'name' ) { 
+        var t = token,
+            v = t.value.toLowerCase(),
+            dir = directives[ v ],
+            params = [];
+            
+        // collect all tokens until eol.
+        while( true ) { 
+            advance(false);
+            
+            if( !token ) {
+                break;
+            }
+            else if ( isNewline( token ) ) {
+                advance(false);
+                break;
+            }
+
+            params.push( token );
+        }
+        
+        // process the directive.
+        if( dir ) { 
+            dir( t, params );
+        }
+        else if( directiveStack.on() ) {
+            // throw error if we're collecting tokens.
+            token_error( token );
+        }
+    }
+    else {
+        if( directiveStack.on() ) { 
+            // this is an error if we're collecting tokens.
+            token_error( token );
+        }
+        else {      
+            // if we're not collecting tokens, we can skip to end of line.
+            while( token && !isNewline( token ) ) { 
+                advance(false);
+            }
+            
+            if ( isNewline( token ) ) {
+                // one more.
+                advance(false);
+            }
+        }
+    }
+}    
+
+function isNewline( t ) { 
+    return t && t.type === "(nl)" && t.value !== ';';
+}
+
+function preprocess(tokenList) { 
+    // reset our globals
+    directiveStack = new DirectiveStack();
+    
+    macros = new Macros( { 
+                    canEvalItem: isValidMacroName, 
+                    valueFn: function(t) { return typeof( t ) === 'undefined' ? null : t.value; } 
+                } );
+    
+    tokens = tokenList;
+    tokenIndex = 0;
+    token = null;
+    results = [];
+
+    // start by finding directives
+    var findDirective = true;
+
+    // load first token.
+    advance();
+
+    while( token ) { 
+        if( findDirective ) { 
+            // # - is a directive line.
+            // Real newlines are skipped.
+            // Any other token switches to normal processing...
+            
+            if( token.type === 'operator' && token.value === '#' ) { 
+                advance(false);
+                directive();
+            }
+            else if( isNewline( token ) ) { 
+                advance(true);
+            }
+            else { 
+                // process this token in the next loop.
+                findDirective = false;
+            }
+        }
+        else {
+            // normal code mode... newlines switch the state back to finding directives.
+            if( token.type === "(nl)" && token.value !== ';' ) {
+                findDirective = true;
+            }
+            advance(true);
+        }
+    }
+    
+    return results;
+}
+
+module.exports = { 
+    run: preprocess
+};
+
+},{"./directive_stack":3,"./macros":6}],9:[function(require,module,exports){
 (function (Buffer){
 'use strict';
 
@@ -332,7 +2417,7 @@ clone.clonePrototype = function(parent) {
 };
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":3}],3:[function(require,module,exports){
+},{"buffer":10}],10:[function(require,module,exports){
 /*!
  * The buffer module from node.js, for the browser.
  *
@@ -1386,7 +3471,7 @@ function decodeUtf8Char (str) {
   }
 }
 
-},{"base64-js":4,"ieee754":5,"is-array":6}],4:[function(require,module,exports){
+},{"base64-js":11,"ieee754":12,"is-array":13}],11:[function(require,module,exports){
 var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 ;(function (exports) {
@@ -1508,7 +3593,7 @@ var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 	exports.fromByteArray = uint8ToBase64
 }(typeof exports === 'undefined' ? (this.base64js = {}) : exports))
 
-},{}],5:[function(require,module,exports){
+},{}],12:[function(require,module,exports){
 exports.read = function(buffer, offset, isLE, mLen, nBytes) {
   var e, m,
       eLen = nBytes * 8 - mLen - 1,
@@ -1594,7 +3679,7 @@ exports.write = function(buffer, value, offset, isLE, mLen, nBytes) {
   buffer[offset + i - d] |= s * 128;
 };
 
-},{}],6:[function(require,module,exports){
+},{}],13:[function(require,module,exports){
 
 /**
  * isArray
@@ -1629,7 +3714,7 @@ module.exports = isArray || function (val) {
   return !! val && '[object Array]' == str.call(val);
 };
 
-},{}],7:[function(require,module,exports){
+},{}],14:[function(require,module,exports){
 (function (global){
 /**
  * @license
@@ -8418,7 +10503,7 @@ module.exports = isArray || function (val) {
 }.call(this));
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],8:[function(require,module,exports){
+},{}],15:[function(require,module,exports){
 var pSlice = Array.prototype.slice,
     _ = require( 'lodash' );
 
@@ -8488,67 +10573,400 @@ function checkObjParts( fullObj, partialObj, opts ) {
     return true;
 }
 
-},{"lodash":7}],9:[function(require,module,exports){
-var util = require( './util' );
+},{"lodash":14}],16:[function(require,module,exports){
+var partialCompare = require( './compare' ),
+    EditList = require( './edits' ),
+    _ = require( 'lodash' );
 
-module.exports = function coverage( path, src, parseTree ) {
+/** 
+ * Block class
+ * Each block represents one or more lines of code (a range) that will 
+ * have to execute if the beginning of the block is reached.
+ */
+function Block( blockType, id, startLine ) { 
+    this.ranges = [ { start: startLine, end: startLine } ];
     
-    return "/* Code Coverage */\n" + src;    
-};
-},{"./util":17}],10:[function(require,module,exports){
-function DirectiveStack() { 
-    this._stack = [];
-    this._on = true;
+    this.id = id;
+    this.type = blockType;
+    this.reset = false;
 }
 
-DirectiveStack.prototype = { 
-    push: function( val ) { 
-        if( !val ) { 
-            this._on = false;
+/**
+ * Increases the end marker for the current range.
+ * If this block was previously interrupted by another block,
+ * this will start a new range.
+ * @param line  The line of code to add to the current range.
+ */
+Block.prototype.addLine = function( line ) { 
+    if( this.interrupted ) { 
+        if( line > this.ranges[ this.ranges.length - 1 ].end + 1 ) { 
+            this.ranges.push( { start: line, end: line } );
+        }    
+        this.interrupted = false;
+    }
+
+    var last = this.ranges[ this.ranges.length - 1 ];
+    last.end = Math.max( last.end, line );
+};
+
+/**
+ * Interrupts the current range. 
+ * @param line  Resets the end marker for the block
+ */
+Block.prototype.interrupt = function() {
+    this.interrupted = true;
+};
+
+Block.TYPES = {
+    FUNCTION: 0,
+    LOOP: 1,
+    OTHER: 2
+};
+
+
+/**
+ * Creates a BlockTracker, which is used to keeps track of the code coverage blocks
+ * @class
+ */
+function BlockTracker( scriptID, editList, idGenerator ) { 
+    
+    var functions = [],
+        curFunction = null,
+        blockStack = [],
+        blocks = [],
+        blockIndex = 0,
+        rawScript = false;
+    
+    /** 
+     * Sets the current function.
+     * @param {string} name The name of the function
+     */
+    this.setFunction = function( name ) { 
+        if( blockStack.length > 0 ) { 
+            this.endBlock();
         }
-        this._stack.push( val );
-    },
+        
+        curFunction = name;
+    };
     
-    invert: function() { 
-        var i =  this._stack.length - 1;
-        if( i < 0 ) {
-            throw "stack is empty";
+    /**
+     * Adds a line into the appropriate block, which is normally the block that 
+     * is on the top of the stack.
+     * 
+     * @param {number} line - The line that should be included.
+     * @param {number} insertPos - The character index where instrumentation should be inserted if needed.
+     */
+    this.addLine = function( line, insertPos ) { 
+        if( blockStack.length === 0 ) {
+            if( rawScript ) { 
+                throw Error( "Extraneous input after last function is invalid." );
+            }
+            
+            // We're outside of all functions.
+            this.startBlock( Block.TYPES.FUNCTION, line, insertPos );
+            rawScript = true;
         }
-        this._stack[i] = !this._stack[i];
-        this._on = this._calcOn();
-    },
+        
+        var top = blockStack[blockStack.length - 1];
+        
+        if( top.reset ) { 
+            this.endBlock();
+            this.startBlock( top.type, line, insertPos );
+        }
+        else {
+            top.addLine( line );
+        }
+    };
+
+    /**
+     * Starts a new block
+     * @param {number} type - The block type.
+     * @param {number} line - The line where the block begins.
+     * @param {number} insertPos - The character index where instrumentation should be inserted.
+     */
+    this.startBlock = function( type, line, insertPos ) {
+        if( arguments.length === 1 ) { 
+            type = type.type;
+            insertPos = type.insertPos;
+            line = type.line;
+        }
+        
+        if( line > -1 && insertPos > -1 ) { 
+            var blockID = idGenerator( scriptID, curFunction, blockIndex++ ),
+                block = new Block( type, blockID, line );
+            
+            if( blockStack.length > 0 ) { 
+                blockStack[blockStack.length - 1].interrupt();
+            }
+            
+            blockStack.push( block );
+            blocks.push( block );
+                
+            // make the edit.
+            editList.insert( "$_C.v('" + blockID + "')\n", insertPos, { indent: "after" } );
+        }
+        else {
+            throw Error( "Invalid startBlock argument(s): " + JSON.stringify( arguments ) );
+        }
+    };
     
-    pop: function() { 
-        this._stack.pop();
-        this._on = this._calcOn();
-    },
+    /** 
+     * Ends a block
+     */
+    this.endBlock = function() { 
+        return blockStack.pop();
+    };
     
-    empty: function() {
-        return this._stack.length === 0;
-    },
-    
-    on: function() { 
-        return this._on;
-    },
-    
-    _calcOn: function() {
-        var s = this._stack;
-        var i = s.length; 
+    /** 
+     * Traverses the stack, resetting blocks until a block of type blockType is found.
+     * @param {integer} blockType - The type of block to find.
+     */
+    this.resetBlockType = function( blockType ) { 
+        var i = blockStack.length;
+        
         while( i-- ) { 
-            if( !s[i] ) {
-                return false;
-            }            
-        }   
-        return true;
+            var p = blockStack[i];            
+
+            p.reset = true;
+            
+            if( p.type === blockType ) { 
+                break;
+            }
+        }
+    };
+    
+    /** 
+     * Returns the blocks that were defined.
+     */
+    this.getBlocks = function() { 
+        return blocks;
+    };
+}
+
+/* Helper Functions */
+    
+/**
+ * Normalize a node that may be a (empty?) array of statements, 
+ * a single item, or a null value. 
+ * Return a non-empty array, or null.
+ * @param {Array|Object} variant
+ */
+function normalBlk( variant ) {
+    if( _.isArray( variant ) ) { 
+        return variant.length ? variant : null;
+    }   
+    return variant ? [ variant ] : null;
+}
+
+/**
+ * Returns the line associated with a parse node's start location
+ * @param {Object} node - The node
+ */
+function startLine( node ) { 
+    return node.loc.start.line;
+}
+
+/**
+ * Returns the character index associated with a parse node's start location
+ * @param {Object} node - The node
+ */
+function startPos( node ) { 
+    return node.range[0];
+}
+    
+/* Statement Types */
+    
+var statementTypes = {};
+    
+statementTypes.FunctionDeclaration = function( node, ctx ) { 
+
+    ctx.setFunction( node.name );
+
+    var funcBody = normalBlk( node.body );
+    
+    if( funcBody ) { 
+        ctx.startBlock( Block.TYPES.FUNCTION, startLine( node ), startPos( funcBody[0] ) );
+        walkTree( funcBody, ctx );
+        ctx.endBlock();
+    }
+};
+    
+statementTypes.IfStatement = function( node, ctx ) { 
+
+    ctx.addLine( startLine( node ), startPos( node ) );
+    walkTree( node.test, ctx );
+    
+    var consequent = normalBlk( node.consequent );
+    if( consequent ) { 
+        ctx.startBlock( Block.TYPES.OTHER, startLine( consequent[0] ), startPos( consequent[0] ) );
+        walkTree( consequent, ctx );
+        ctx.endBlock();
+    }
+    
+    var alt = node.alternate;
+    if( alt ) { 
+        if( _.isArray( alt ) ) { 
+            if( alt.length ) { 
+                // ELSE: add alternate block.
+                ctx.startBlock( Block.TYPES.OTHER, startLine( alt[0] ), startPos( alt[0] ) );
+                walkTree( alt, ctx );
+                ctx.endBlock();
+            }
+        }
+        else { 
+            // ELSEIF: block will be handled inside.
+            walkTree( alt, ctx );
+        }
     }
 };
 
-module.exports = DirectiveStack;
-},{}],11:[function(require,module,exports){
+statementTypes.ForStatement = statementTypes.ForCStyleStatement = function( node, ctx ) { 
+    
+    ctx.addLine( startLine( node ), startPos( node ) );
+    walkTree( [ node.first, node.second, node.third ], ctx ); 
+    
+    var body = normalBlk( node.body );
+        
+    if( body ) { 
+        ctx.startBlock( Block.TYPES.LOOP, startLine( body[0] ), startPos( body[0] ) );
+        walkTree( body, ctx );
+        ctx.endBlock();
+    }
+};
+
+statementTypes.ForInStatement = function( node, ctx ) { 
+
+    ctx.addLine( startLine( node ), startPos( node ) );
+    walkTree( [ node.first, node.second ], ctx ); 
+    
+    var body = normalBlk( node.body );
+        
+    if( body ) { 
+        ctx.startBlock( Block.TYPES.LOOP, startLine( body[0] ), startPos( body[0] ) );
+        walkTree( body, ctx );
+        ctx.endBlock();
+    }
+};
+
+statementTypes.SwitchStatement = function( node, ctx ) { 
+    ctx.addLine( startLine( node ), startPos( node ) );
+    walkTree( node.discriminant, ctx ); 
+    walkTree( normalBlk( node.cases ), ctx );
+};
+
+statementTypes.SwitchCase = function( node, ctx ) { 
+    var consequent = normalBlk( node.consequent );
+        
+    if( consequent ) { 
+        ctx.startBlock( Block.TYPES.OTHER, startLine( consequent[0] ), startPos( consequent[0] ) );
+        walkTree( consequent, ctx );
+        ctx.endBlock();
+    }
+};
+
+statementTypes.BreakStatement = function( node, ctx ) { 
+    ctx.addLine( startLine( node ), startPos( node ) );
+    
+    // reset the closest loop.
+    ctx.resetBlockType( Block.TYPES.LOOP );
+};
+
+statementTypes.BreakStatement = statementTypes.ContinueStatement = function( node, ctx ) { 
+    ctx.addLine( startLine( node ), startPos( node ) );
+    
+    // reset the closest loop.
+    ctx.resetBlockType( Block.TYPES.LOOP );
+};
+
+statementTypes.ContinueIfStatement = statementTypes.BreakIfStatement = function( node, ctx ) { 
+    ctx.addLine( startLine( node ), startPos( node ) );
+    walkTree( node.first, ctx );
+    
+    // reset the closest loop.
+    ctx.resetBlockType( Block.TYPES.LOOP );
+};
+
+statementTypes.ReturnStatement = function( node, ctx ) { 
+    ctx.addLine( startLine( node ), startPos( node ) );
+    walkTree( node.argument, ctx );
+    
+    // reset the closest loop.
+    ctx.resetBlockType( Block.TYPES.FUNCTION );
+};
+
+statementTypes.OtherStatements = function( node, ctx ) { 
+    ctx.addLine( startLine( node ), startPos( node ) );
+
+    [ 'argument', 'expression', 'init', 'elements', 'left', 'right', 'first', 'second', 'third', 'fourth', 'body', 'alternate' ].forEach( function( v ) {
+        if( node[v] ) { 
+            walkTree( node[v], ctx );
+        }
+    } );    
+};
+
+/** 
+ * Walks a parse tree and discovers code blocks
+ * along the way.
+ * @param parseTree A node or array of nodes
+ * @param ctx  The parsing context class.   
+ */
+function walkTree( parseTree, ctx ) {
+    var statements = normalBlk( parseTree );
+    
+    if( statements ) { 
+        statements.forEach( function( n ) { 
+            if( n ) { 
+                ( statementTypes[n.type] || statementTypes.OtherStatements )( n, ctx );
+            }
+        } );
+    }
+}
+
+function defaultIDGenerator( scriptID, functionName, blockIndex ) {     
+    return scriptID + ":" + functionName + "[" + blockIndex + "]";
+}
+    
+module.exports = function coverage( scriptID, src, parseNode, options ) {
+
+    options = options || {};
+    options.idGenerator = options.idGenerator || defaultIDGenerator;
+    
+    var editList = new EditList( src );
+    var tracker = new BlockTracker( scriptID, editList, options.idGenerator );
+    
+    walkTree( parseNode, tracker );
+    
+    /*
+    var blockSummary = tracker.getBlocks().map( function(b) { 
+        return b.id + " -> Ranges: " + JSON.stringify( b.ranges );
+    } ).join( "\n" );
+    */
+    // editList.insert( "/*\n" + blockSummary + "\n*/", src.length );
+    
+    return editList.apply();
+};
+},{"./compare":15,"./edits":17,"lodash":14}],17:[function(require,module,exports){
 var Edits = module.exports = function Edits(initialValue) { 
     this.origValue = initialValue;
     this.edits = [];
 };
+
+function findIndent( code, pos ) { 
+    var indentStr = "";
+    while( --pos > 0 ) {
+        var ch = code[pos];
+        switch( ch ) { 
+            case '\t': case ' ':
+                indentStr = ch + indentStr;
+                break;
+            case '\n': case '\r':
+                return indentStr;
+            default: 
+                indentStr = "";
+        }
+    }
+    return indentStr;
+}
 
 Edits.prototype.apply = function applyEdits() { 
     var edits = this.edits,
@@ -8574,15 +10992,28 @@ Edits.prototype.apply = function applyEdits() {
     return buffers.join( "" );
 };
 
-Edits.prototype.insert = function( str, beforeIndex ) { 
+Edits.prototype.insert = function( str, beforeIndex, options ) { 
+    options = options || {};
+    
+    if( options.indent ) { 
+        var indent = findIndent( this.origValue, beforeIndex );
+        
+        if( options.indent === "after" ) { 
+            str += indent;
+        }
+        else { 
+            str = indent + str;
+        }
+    }
+
     this.edits.push( { insert_pos: beforeIndex, content: str } );
 };
-},{}],12:[function(require,module,exports){
+},{}],18:[function(require,module,exports){
 // instrument.js
 
-var util = require( './util' ),
-    partialCompare = require( './compare' ),
-    EditList = require( './edits' );
+var partialCompare = require( './compare' ),
+    EditList = require( './edits' ),
+    _ = require( 'lodash' );
 
 function isInstrumented( funcBody ) {
 
@@ -8675,7 +11106,7 @@ function instrument( scriptRefStr, code, parseTree, manglerFn ) {
     
     // walk the top level looking for functions...
     var editsList = new EditList( code ),
-        statements = util.isArray( parseTree ) ? parseTree : [ parseTree ];
+        statements = _.isArray( parseTree ) ? parseTree : [ parseTree ];
     
     var alreadyInstrumented = false;
     
@@ -8726,7 +11157,7 @@ function instrumentReturns( editList, funcID, code, node ) {
             return;
         }
         
-        children = util.isArray( node ) ? node : util.compact( [ node.left, node.right, node.body, node.consequent, node.alternate ] );
+        children = _.isArray( node ) ? node : _.compact( [ node.left, node.right, node.body, node.consequent, node.alternate, node.cases ] );
         
         children.forEach( function( n ) { 
             instrumentReturns( editList, funcID, code, n );
@@ -8735,2057 +11166,4 @@ function instrumentReturns( editList, funcID, code, node ) {
 } 
 
 module.exports = instrument;
-},{"./compare":8,"./edits":11,"./util":17}],13:[function(require,module,exports){
-function Lexer( code, options ) { 
-    options = options || {};
-    this.setInput( code || "" );
-}
-
-module.exports = Lexer;
-
-var LINE_COMMENT = 1,
-    BLOCK_COMMENT = 2,
-    SINGLE_STR = 3,
-    DOUBLE_STR = 4,
-    VARIABLE = 5,
-    NUMBER_NO_DECIMAL = 6,
-    NUMBER_DECIMAL = 7,
-    ELLIPSIS = 8,
-    OBJ_LITERAL = 9,
-    WHITESPACE = 10;
-
-function makeToken( t, v, line, from, to, colFrom, colTo ) { 
-    return { 
-        type: t, 
-        value: v, 
-        range: [from, to],
-        loc: { start: { line: line, col: colFrom }, end: { line: line, col: colTo } }
-    };
-}
-    
-Lexer.prototype = { 
-    setInput: function( code ) {
-        this.code = code.replace( /\r\n/g, '\n' ).replace( /\r/g, '\n' );
-        this.line = 1;
-        this.pos = 0;
-        this.linePos = 0;
-        this.done = ( this.code.length === 0 );
-        this.curToken = null;
-        this.indent = "";
-        this.whitespace = []; 
-    },
-    
-    getSource: function() { 
-        return this.code || "";
-    },
-    
-    getWhitespace: function() { 
-        return this.whitespace;
-    },
-    
-    readNextToken: function() { 
-        var result = null,
-            token = "",
-            state = 0,
-            eof = false,
-            eat = false,
-            continuation = false,
-            nlInComment = false,
-            ch = this.code.charAt( this.pos ),
-            ch1 = this.code.charAt( this.pos + 1 ),
-            addCommentNewline = false,
-            from, colFrom, tmpLine = 0;
-        
-        if( ch1 === "" ) { 
-            eof = true;
-            this.pos++;
-            ch1 = '\n';
-        }
-        
-        if( ch !== "" && !this.done ) { 
-            
-            while( true ) {
-                switch( state ) { 
-                case 0:
-                    from = this.pos;
-                    colFrom = this.linePos;
-
-                    // start state 
-                    if( /[_A-Za-z]/.test( ch ) ) {
-                        if( !/[_A-Za-z0-9]/.test( ch1 ) )  { 
-                            result = makeToken( "name", ch, this.line, from, this.pos, colFrom, this.linePos );
-                        }
-                        else { 
-                            state = VARIABLE;
-                            token = ch;
-                        }
-                    }
-                    else if( /[ \t]/.test( ch ) ) { 
-                        if( /[ \t]/.test( ch1 ) ) {
-                            token = ch;
-                            state = WHITESPACE;
-                        }
-                        else {
-                            this.whitespace.push( makeToken( "(ws)", ch, this.line, from, this.pos, colFrom, this.linePos ) );
-                        }
-                    }
-                    else if( ch === ';' ) {
-                        result = makeToken( "(nl)", ch, this.line, from, this.pos, colFrom, this.linePos );
-                    }
-                    else if( ch === '\n' ) {
-                        if( continuation ) {
-                            this.whitespace.push( makeToken( "(nl)", ch, this.line, from, this.pos, colFrom, this.linePos ) );
-
-                            // skip newline.
-                            continuation = false;
-                            token = "";
-                        }
-                        else {
-                            result = makeToken( "(nl)", ch, this.line, from, this.pos, colFrom, this.linePos );
-                        }
-                    }                
-                    else if( ch === '\\' ) { 
-                        continuation = true;
-                        this.whitespace.push( makeToken( "continuation", ch, this.line, from, this.pos, colFrom, this.linePos ) );
-                    } 
-                    else if( ch === "/" && ch1 === "/" ) { 
-                        state = LINE_COMMENT;
-                        token = ch;
-                    }
-                    else if( ch === "/" && ch1 === "*" ) { 
-                        eat = true;
-                        state = BLOCK_COMMENT;
-                        addCommentNewline = false;
-                        nlInComment = false;
-                        token = "/*";
-                    }
-                    else if( ch === "'" ) { 
-                        state = SINGLE_STR;
-                    }
-                    else if( ch === '"' ) { 
-                        state = DOUBLE_STR;
-                    }
-                    else if( ch === '.' && ch1 === '.' ) { 
-                        state = ELLIPSIS;
-                        token = ".";
-                    }
-                    else if( ch === "." && /[0-9]/.test( ch1 ) ) { 
-                        state = NUMBER_DECIMAL;
-                        token = ch;
-                    }
-                    else if( /[0-9]/.test( ch ) && ch1 === "." ) { 
-                        state = NUMBER_NO_DECIMAL;
-                        token = ch;
-                    }
-                    else if( /[0-9]/.test( ch ) && !/[0-9]/.test( ch1 ) ) { 
-                        result = makeToken( "number", ch, this.line, from, this.pos, colFrom, this.linePos );
-                    }
-                    else if( /[0-9]/.test( ch ) ) { 
-                        state = NUMBER_NO_DECIMAL;
-                        token = ch;
-                    }
-                    else if( ch === '#' && /[0-9]/.test( ch1 ) ) { 
-                        state = OBJ_LITERAL;
-                        token = '#';
-                    }
-                    else if( ch === "$" && ch1 === "$" ) { 
-                        result = makeToken( "operator", "$$", this.line, from, this.pos, colFrom, this.linePos );
-                        eat = true;
-                    }
-                    else if( ch === "$" ) { 
-                        result = makeToken( "operator", "$", this.line, from, this.pos, colFrom, this.linePos );
-                    }
-                    else if( ( "&^|+-*/%<>=!".indexOf( ch ) != -1 && ch1 === "=" ) ||
-                       ( ch === "<" && ch1 === ">" ) || 
-                       ( ch === "<" && ch1 === "<" ) || 
-                       ( ch === ">" && ch1 === ">" ) || 
-                       ( ch === "|" && ch1 === "|" ) ||
-                       ( ch === "&" && ch1 === "&" ) ||
-                       ( ch === "&" && ch1 === "&" ) ||
-                       ( ch === "^" && ch1 === "^" ) ) {
-                        result = makeToken( "operator", ch + ch1, this.line, from, this.pos, colFrom, this.linePos );
-                        eat = true;
-                    }
-                    else if( "#{}/%*,.()[]?:<>!=+-^|&".indexOf( ch ) != -1 ) { 
-                        result = makeToken( "operator", ch, this.line, from, this.pos, colFrom, this.linePos );
-                    }
-                    
-                    break;
-                case 1: // LINE_COMMENT
-                    if( ch1 === '\n' ) {
-                        if( !continuation ) { 
-                            this.whitespace.push( makeToken( "LineComment", token, this.line, from, this.pos, colFrom, this.linePos ) );
-                            result = makeToken( '(nl)', ch1, this.line, from, this.pos, colFrom, this.linePos );
-                        }
-                        else { 
-                            this.whitespace.push( makeToken( "LineComment", token, this.line, from, this.pos, colFrom, this.linePos ) );
-                            this.whitespace.push( makeToken( "(nl)", ch1, this.line, from, this.pos, colFrom, this.linePos ) );
-                        }
-                        
-                        // ignore comments.
-                        eat = true;                    
-                        state = 0;
-                        token = "";
-                    }
-                    else { 
-                        token += ch;
-                    }
-                    break;
-                case 2: // BLOCK COMMENT
-                    if( ch === '*' && ch1 === '/' ) { 
-                        this.whitespace.push( makeToken( "BlockComment", token + "*/", this.line, from, this.pos, colFrom, this.linePos ) );
-                        
-                        // ignore comments.
-                        state = 0;
-                        token = "";
-                        
-                        // We want block comments to add one newline token if it contains a newline.
-                        // However, if it only contains one newline and it was preceded by a continuation token,
-                        // don't add the newline.
-                        if( ( continuation === false && nlInComment ) || addCommentNewline ) {
-                            result = makeToken( '(nl)', "", tmpLine || this.line, from, from, colFrom, colFrom );                    
-                        }
-                        
-                        eat = true;
-                    }
-                    else { 
-                        if( ch === '\n' ) {
-                            if( nlInComment === false ) {
-                                tmpLine = this.line;
-                                from = this.pos; 
-                                colFrom = this.linePos;
-                            }
-                            
-                            // If this is >= second newline, and we're preceded by a continuation, add a newline.
-                            addCommentNewline = continuation && nlInComment;
-                            nlInComment = true;
-                        }
-                        token += ch;
-                    }
-                    break;
-                case 3: // SINGLE_STR 
-                    if( ch === "'" && ch1 === "'" ) {   
-                        token += "'";
-                        eat = true;
-                    }
-                    else if( ch === "'" ) { 
-                        result = makeToken( 'string', token, this.line, from, this.pos, colFrom, this.linePos );
-                    }
-                    else { 
-                        token += ch;
-                    }
-                    break;                
-                case 4: // DOUBLE_STR -- first ch will not be '"'
-                    if( ch === '"' && ch1 === '"' ) {   
-                        token += '"';
-                        eat = true;
-                    }
-                    else if( ch === '"' ) { 
-                        result = makeToken( 'string', token, this.line, from, this.pos, colFrom, this.linePos );
-                    }
-                    else { 
-                        token += ch;
-                    }
-                    break;                
-                case 5: // VARIABLE
-                    token += ch;
-                    
-                    if( !/[_A-Za-z0-9]/.test( ch1 ) ) { 
-                        result = makeToken( 'name', token, this.line, from, this.pos, colFrom, this.linePos );
-                    }
-                    break;
-                case 6: // NUMBER_NO_DECIMAL
-                    if( ch === '.'  ) { 
-                        if( /[0-9]/.test( ch1 ) ) {
-                            token += '.';
-                            state = NUMBER_DECIMAL;
-                        }
-                        else {
-                            result = makeToken( 'number', token, this.line, from, this.pos, colFrom, this.linePos );
-                        }
-                    }
-                    else if( !/[.0-9]/.test( ch1 ) ) {
-                        result = makeToken( 'number', token + ch, this.line, from, this.pos, colFrom, this.linePos );
-                    }
-                    else {
-                        token += ch;
-                    }                    
-                    break;
-                case 7: // NUMBER_DECIMAL 
-                    if( !/[0-9]/.test( ch1 ) ) {
-                        result = makeToken( 'number', token + ch, this.line, from, this.pos, colFrom, this.linePos );
-                    }
-                    else {
-                        token += ch;
-                    }                    
-                    break;                
-                case 8: // ELLIPSIS
-                    token += ch;
-                    
-                    if( ch1 != '.' ) { 
-                        if( token != '...' ) { 
-                            token = "...";
-                        }
-                        result = makeToken( 'operator', token, this.line, from, this.pos, colFrom, this.linePos );
-                    }
-                    break;
-                case 9: // OBJ_LITERAL  -- #F1A981C3
-                    token += ch;
-                    
-                    if( !/[0-9a-fA-F]/.test( ch1 ) ) { 
-                        result = makeToken( 'objref', token, this.line, from, this.pos, colFrom, this.linePos );
-                    }
-                    break;
-                case 10: // WHITESPACE
-                    token += ch;
-                    
-                    if( !/[ \t]/.test( ch1 ) ) { 
-                        this.whitespace.push( makeToken( '(ws)', token, this.line, from, this.pos, colFrom, this.linePos ) );
-                        state = 0;
-                    }
-                    break;
-                }
-               
-                if( eof ) {
-                    this.pos++; break;
-                }
-                
-                this.linePos++;
-                
-                // keep track of lines.
-                if( ch === '\n' ) { 
-                    this.line++; this.linePos = 0; 
-                }
-
-                if( eat ) { 
-                    this.linePos += 1;
-                    
-                    // consume the whole lookahead and keep track of lines.
-                    if( ch1 === '\n' ) { 
-                        this.line++; 
-                        this.linePos = 0; 
-                    }
-                     
-                    this.pos += 2;
-                    ch = this.code.charAt( this.pos );
-                }
-                else {
-                    this.pos++;
-                    ch = ch1;
-                }
-                
-                if( result ) {             
-                    // if we have a result now, just exit.
-                    break;
-                }
-                
-                // update lookahead.
-                ch1 = this.code.charAt( this.pos + 1 );
-
-                // check for eof conditions.
-                if( ch === "" ) { 
-                    // we must have consumed the lookahead and ran into the eof.
-                    break;
-                }
-                else if( ch1 === "" ) { 
-                    // lookahead is eof -- process one more character (set lookahead to newline).
-                    eof = true;
-                    ch1 = '\n';
-                }
-                eat = false;
-            }
-        }
-        
-        if( ( !this.done && result === null ) ) {
-            this.done = true;
-        }
-        
-        return result;            
-    },
-        
-    get: function() { 
-        var rtn = null;
-        if( this.curToken ) {
-            rtn = this.curToken;
-            this.curToken = null;
-        }
-        else { 
-            rtn = this.readNextToken();
-        }
-        return rtn;
-    },
-    
-    peek: function() { 
-        if( !this.curToken ) {
-            this.curToken = this.readNextToken();
-        }
-        return this.curToken;
-    }
-};
-
-},{}],14:[function(require,module,exports){
-var util = require( './util' );
-
-function identity(v) { return v; }
-function yes() { return true; } 
-
-function Macros( options ) {
-    options = options || {};
-    
-    this.valueFn = options.valueFn || identity;
-    this.canEvalItem = options.canEvalItem || yes;
-
-    this.defTable = {};
-}
-
-Macros.prototype = {
-    isDefined: function( name ) {
-        var n = this.valueFn( name );
-        return typeof this.defTable[n] !== 'undefined';
-    },
-    
-    undef: function( name ) {
-        var n = this.valueFn( name );
-        delete this.defTable[n];
-        return this;
-    },
-    
-    define: function( name, values ) {
-        var n = this.valueFn( name );
-        this.defTable[n] = values;
-        return this;
-    },
-    
-    evaluate: function( name ) { 
-        return this._eval( name, {} );
-    },
-    
-    _eval: function( name, visited ) {
-        var n = this.valueFn( name );
-
-        if( visited[n] ) { 
-            throw { 
-                message: "Recursive macro definition", 
-                name: name 
-            };
-        }        
-        visited[n] = true;
-        
-        var macroVals = this.defTable[n],
-            results = [];
-        
-        if( typeof macroVals !== 'undefined' ) { 
-
-            if( !util.isArray( macroVals ) ) {
-                macroVals = [ macroVals ];
-            }
-                    
-            var temp = macroVals.map( function( val, k ) {
-                return this.canEvalItem(val) && this.isDefined( val ) ?     
-                        this._eval( val, visited ) : val;
-                }, this );
-            
-            var i = -1, len = temp.length;
-            while( ++i < len ) { 
-                var a = temp[i];
-                if( !util.isArray( a ) ) { 
-                    results.push( a );
-                }
-                else {  
-                    results.push.apply( results, a );
-                }
-            }
-        }
-        
-        return results;
-    }
-};
-
-module.exports = Macros;
-},{"./util":17}],15:[function(require,module,exports){
-
-// parse.js
-// OScript parser based on Douglas Crockford's javascript parser.
-// From Top Down Operator Precedence
-
-var Lexer = require( './lexer' ),
-    util = require( './util' ),
-    preprocessor = require( './preprocessor' ),
-    clone = require( 'clone' );
-    
-function make_parser( options ) {
-    "use strict";
-    
-    options = options || { unreachable_code_errors: false };
-
-    var builtinTypes = util.union( [ 
-                        "Assoc", 
-                        "Bytes", "Boolean",
-                        "CapiConnect", "CacheTree", "CAPILOGIN", "CAPILog", "CAPIErr",
-                        "Dialog", "Date", "Dynamic", "DAPINode", "DAPISession", "DAPIVersion", "DAPIStream", "DOMAttr",  "DOMCDATASection",  "DOMCharacterData",  "DOMComment", 
-                            "DOMDocument",  "DOMDocumentFragment",  "DOMDocumentType", 
-                            "DOMElement",  "DOMEntity",  "DOMEntityReference",  "DOMImplementation", 
-                            "DOMNamedNodeMap",  "DOMNode",  "DOMNodeList",  "DOMNotation",  "DOMParser", 
-                            "DOMProcessingInstruction",  "DOMText",
-                        "Error",
-                        "File", "FileCopy", "FilePrefs", "Frame",
-                        "Integer",
-                        "JavaObject",
-                        "List", "Long",
-                        "MailMessage",
-                        "Object", "ObjRef",
-                        "Pattern",  "PatFind",  "PatChange",
-                        "Real", "RegEx", "Record", "RecArray",
-                        "String", "Script", "Socket",
-                        "UAPISESSION",  "UAPIUSER", "ULong",
-                        "WAPISESSION",  "WAPIMAP","WAPIMAPTASK","WAPIWORK","WAPISUBWORK",  
-                        "SAXParser",  "XSLProcessor" 
-                        ], options.additionalTypes || [] ).map( function( f ) { return f.toLowerCase(); } );
-    
-    var reservedWords = [ "and", "or", "not", "eq", "lt", "gt",
-                            "if", "elseif", "for", "switch", "repeat", "while", "end", "function", 
-                            "in", "to", "downto", "default", "case", "return", "break", "breakif", "continueif", "continue" ];
-                            
-    var opAlternates = {
-        'eq': '=',
-        'lt': '<',
-        'gt': '>',
-        'or': '||',
-        'and': '&&',
-        'not': '!'
-    };
-    
-    var whitespace = [];
-    var lex = null;
-    var scope;
-    var symbol_table = {};
-    var token;
-    var tokens;
-    var token_nr;
-
-    var itself = function () {
-        return this;
-    };
-
-    function skip_newlines() { 
-        while( token.arity === "(nl)" ) {
-            advance( "(nl)" );
-        }
-    }
-
-    function eos() { 
-        advance( "(nl)" );
-        skip_newlines();
-    }
-
-    var token_error = function ( t, message ) {
-        t.type = "SyntaxError";
-        t.message = message;
-        throw t;
-    };    
-    
-    var original_scope = {
-        define: function ( n ) {
-            var v = n.value.toLowerCase();
-            var t = this.def[v];
-            
-            /*if (typeof t === "object" && t.reserved ) {
-                // token_error( n, n.value + " not expected here. The id is already defined" );                
-            }
-            */
-            
-            if( util.indexOf( reservedWords, v ) > -1 ) {
-                token_error( n, n.value + ' not expected here.' );
-            }
-            
-            this.def[v] = n;
-            n.reserved = false;
-            n.nud      = itself;
-            n.led      = null;
-            n.std      = null;
-            n.lbp      = 0;
-            n.scope    = scope;
-            
-            return n;
-        },
-        
-        find: function (n) {
-            // n is already lowercase...
-            
-            var e = this, o;
-            while (true) {
-                o = e.def[n];
-                if (o && typeof o !== 'function') {
-                    return e.def[n];
-                }
-                e = e.parent;
-                if (!e) {
-                    o = symbol_table[n];
-                    return o && typeof o !== 'function' ? o : symbol_table["(name)"];
-                }
-            }
-        },
-        
-        pop: function () {
-            scope = this.parent;
-        },
-        
-        reserve: function (n) {
-            if (n.arity !== "name" || n.reserved) {
-                return;
-            }            
-            var v = n.value.toLowerCase();
-            
-            var t = this.def[v];
-            if (t) {
-                if (t.reserved) {
-                    return;
-                }
-                if (t.arity === "name") {
-                    token_error(n, "Already defined.");
-                }
-            }
-            this.def[v] = n;
-            n.reserved = true;
-        }
-    };
-
-    function new_scope() {
-        var s = scope;
-        scope = Object.create(original_scope);
-        scope.def = {};
-        scope.parent = s;
-        return scope; 
-    }
-    
-    function reverse() { 
-        token_nr -= 2;
-        advance();
-    }
-
-    function advance( id ) {
-        var a, o, t, v;
-        
-        if (id && token.id !== id) {
-            token_error( token, "Expected '" + id + "'.");
-        }
-        
-        if (token_nr >= tokens.length) {
-            token = symbol_table["(end)"];
-            return;
-        }
-        
-        t = tokens[token_nr];
-        token_nr++;
-        
-        v = t.value;
-        a = t.type;
-        var vl = v.toLowerCase();
-        
-        var alt = opAlternates[vl];
-        
-        // check for operator alternates...
-        if( a === "name" && alt ) { 
-            a = 'operator';
-            vl = alt;
-        }
-        
-        switch( a ) { 
-        case "name":
-            if( util.indexOf( builtinTypes, vl ) !== -1 ) { 
-                o = scope.find(vl);
-                
-                if( o === symbol_table["(name)"] ) { 
-                    o = symbol_table[vl];
-                    a = "name";
-                }
-            }
-            else { 
-                o = scope.find(vl);
-            }
-            break;
-        case "operator":
-            o = symbol_table[vl];
-            if (!o) {
-                token_error( t, "Unknown operator.");
-            }
-            break;
-        case "string": case "number": case "objref":
-            o = symbol_table["(literal)"];
-            a = "literal";
-            break;
-        case "(nl)":
-            o = symbol_table[a];
-            break;
-        default:
-            token_error( t, "Unexpected token.");
-        }
-        
-        // create an object from the type defined in the symbol table.
-        token = Object.create(o);
-        token.range = clone( t.range );
-        token.loc = clone( t.loc );
-        token.value = v;
-        token.arity = a;
-                
-        return token;
-    }
-
-    var expression = function (rbp) {
-        var left;
-        var t = token;
-        
-        // We shouldn't find statement reserved words here...
-        if( t.std && t.reservedWord ) {
-            // This statement token shouldn't be here.
-            token_error( t, t.value + " not expected here." );
-        }
-        
-        advance();
-        left = t.nud();
-        while (rbp < token.lbp ) {
-            t = token;
-            advance();
-            left = t.led(left);
-        }
-        return left;
-    };
-
-    var statement = function () {
-        var n = token, v, eosTok;
-        
-        // try to match labels...
-        if( n.arity === 'name' ) { 
-            advance();
-            
-            if( token.id === ':' ) { 
-                advance( ":" );
-                scope.define( n );  // this also prevents reserved words from being labels.
-                n.label = true;
-                skip_newlines();
-                return n;
-            }
-            
-            if( util.indexOf( builtinTypes, n.value.toLowerCase() ) > -1 ) { 
-                // if the next character is a name, this is probably a declaration.
-                if( token.arity === "name" ) { 
-                    return declaration( n );
-                }
-                else if( token.id === '(nl)' ) { 
-                    // a variable type is allowed to be alone on a line --- essentially a noop.
-                    eosTok = token;
-                    eos();
-                    
-                    return { 
-                        type: "ExpressionStatement",
-                        range: [ n.range[0], eosTok.range[1] ],
-                        expression: n,
-                        eos: eosTok,
-                        arity: "statement"
-                    };
-                }
-            }
-            
-            // reverse and parse as a statement or an expression.
-            reverse();
-        }
-        
-        // if our token has a std function it is one of our statements.
-        if (n.std) {
-            advance();
-            return n.std();
-        }
-
-        // anything else will be a statement expression
-        return statementExpression();
-    };
-    
-    var statementExpression = function( ) {
-        var v = expression(0);
-        
-        var eosTok = token;
-        eos();
-        
-        // if it's an expression statement, wrap it in an EpressionStatement.
-        return { 
-            type: "ExpressionStatement",
-            range: [ v.range[0], eosTok.range[1] ],
-            loc: [ v.loc.start, eosTok.loc.end ],
-            expression: v,
-            eos: eosTok,
-            arity: "statement"
-        };    
-    };
-
-    var statements = function () {
-        var a = [], s;
-        while (true) {
-            if (token.id === "end" || token.id === "(end)" || token.id === 'else' || token.id === 'elseif' || token.id === 'until' ) {
-                break;
-            }
-            s = statement();
-            if (s) {
-                a.push(s);
-            }
-        }
-        
-        if( a.length === 0 ) { 
-            return null;
-        }
-
-        return a;
-    };
-
-    var original_symbol = {
-        nud: function () {
-            if( this.arity === 'name' ) {
-                // console.warn( "%s was not defined", this.value );
-                return this;
-            }
-
-            token_error( this, "Error parsing this statement.");
-        },
-        led: function (left) {
-            token_error( this,"Missing operator.");
-        }
-    };
-
-    var symbol = function (id, bp) {
-        var s = symbol_table[id];
-        bp = bp || 0;
-        if (s) {
-            if (bp >= s.lbp) {
-                s.lbp = bp;
-            }
-        } else {
-            s = Object.create(original_symbol);
-            s.id = s.value = id;
-            s.lbp = bp;
-            symbol_table[id] = s;
-        }
-        return s;
-    };
-    
-    var getLocStart = function( ref ) {
-        if( ref && ref.loc ) {
-            return ref.loc.start;
-        }
-        return null;
-    };
-
-    var getLocEnd = function( ref ) {
-        if( ref && ref.loc ) {
-            return ref.loc.end;
-        }
-        return null;
-    };
-    
-    var constant = function (s, v) {
-        var x = symbol(s);
-        x.nud = function () {
-            scope.reserve(this);
-            this.value = symbol_table[this.id].value;
-            this.arity = "literal";
-            return this;
-        };
-        x.value = v;
-        return x;
-    };
-    
-    var infix = function (id, bp, led) {
-        var s = symbol(id, bp);
-        s.led = led || function (left) {
-        
-            this.left = left;
-            this.right = expression(bp);
-            this.arity = "binary";
-            this.type = operatorType[id] || "BinaryExpression";
-            
-            this.range = [ this.left.range[0], this.right.range[1] ];
-            this.loc = { start: getLocStart( this.left ), end: getLocEnd( this.right ) };
-            
-            return this;
-        };
-        return s;
-    };
-
-    var infixr = function (id, bp, led) {
-        var s = symbol(id, bp);
-        s.led = led || function (left) {
-        
-            this.left = left;
-            this.right = expression(bp - 1);
-            this.arity = "binary";
-            this.type = operatorType[id] || "BinaryExpression";
-            
-            this.range = [ this.left.range[0], this.right.range[1] ];
-            this.loc = { start:  getLocStart( this.left ), end: getLocEnd( this.right ) };
-
-            return this;
-        };
-        return s;
-    };
-
-    var assignment = function (id) {
-        return infixr(id, 10, function (left) {
-            if (left.id !== "." && left.id !== "[" && left.id !== '$' && left.id !== '$$' && left.arity !== "name" ) {
-                token_error( left,"Bad lvalue.");
-            }
-            this.left = left;
-            this.right = expression(9);
-            this.assignment = true;
-            this.arity = "binary";
-
-            this.type = "AssignmentExpression";
-            this.operator = this.id;
-            
-            this.range = [ this.left.range[0], this.right.range[1] ];
-            this.loc = { start:  getLocStart( this.left ), end: getLocEnd( this.right ) };
-            
-            return this;
-        });
-    };
-
-    var prefix = function (id, nud) {
-        var s = symbol(id);
-        s.nud = nud || function () {
-            scope.reserve(this);
-            this.argument = expression(70);
-            this.arity = "unary";
-            this.type = operatorType[id] || "UnaryExpression";
-            this.operator = this.id;
-            this.prefix = true;
-            this.range = [ this.range[0], this.argument.range[1] ];
-            this.loc = { start:  getLocStart( this ), end: getLocEnd( this.argument ) };
-
-            return this;
-        };
-        return s;
-    };
-
-    var prefixist = function (id, nud) {
-        var s = symbol(id);
-        s.nud = nud || function () {
-            scope.reserve(this);
-            this.argument = expression(90);
-            this.arity = "unary";
-            this.type = operatorType[id] || "UnaryExpression";
-            this.operator = this.id;
-            this.range = [ this.range[0], this.argument.range[1] ];
-            this.loc = { start: getLocStart( this ), end: getLocEnd( this.argument ) };
-            
-            return this;
-        };
-        return s;
-    };
-    
-    var prefix_infix = function( id, bp, nud, led ) {
-        var s = symbol( id, bp );
-        s.nud = nud;
-        s.led = led || nud;
-        return s;
-    };
-        
-    var stmt = function (s, f) {
-        var x = symbol(s);
-        x.nud = function () {
-            scope.reserve(this);
-            this.first = expression(70);
-            this.arity = "unary";
-            return this;
-        };
-        x.std = f;
-        return x;
-    };
-
-    symbol("(nl)" );
-    symbol( "end" );
-    symbol("(end)");
-    symbol("(name)");
-    symbol("...");
-    symbol(":");
-    symbol(";");
-    symbol(")");
-    symbol("]");
-    symbol("}");
-    symbol(",");
-    symbol( "else" );
-    symbol( "until" );
-    symbol( "case" );
-    symbol( "default" );
-    symbol( "to" );
-    symbol( "downto" );
-
-    constant( "true", true );
-    constant( "false", false );
-    constant( "undefined", null );
-
-    symbol("(literal)").nud = itself;
-
-    symbol("this").nud = function () {
-        scope.reserve(this);
-        this.arity = "this";
-        return this;
-    };
-
-    assignment("=");
-
-    assignment("+=");
-    assignment("-=");
-
-    assignment("*=");
-    assignment("/=");
-    assignment("%=");
-
-    assignment("&=");
-    assignment("|=");
-    assignment("^=");
-
-    infix("?", 20, function (left) {
-        this.first = left;
-        this.second = expression(0);
-        advance(":");
-        this.third = expression(0);
-        this.arity = "ternary";
-        
-        this.range = [ this.first.range[0], this.third.range[1] ];
-        this.loc = { start:  getLocStart( this.first ), end: getLocEnd( this.third ) };
-        return this;
-    });
-
-    infixr("&", 15);
-    infixr("|", 15);
-    infixr("^", 15);
-
-    infixr("and", 30);
-    infixr("or", 30);
-    infixr("&&", 30);
-    infixr("||", 30);
-    infixr("^^", 30);
-    
-    infixr("==", 40);
-    infixr("!=", 40);
-    infixr("<>", 40);
-    infixr("<", 40);
-    infixr("<=", 40);
-    infixr(">", 40);
-    infixr(">=", 40);
-
-    infixr( "<<", 45 );
-    infixr( ">>", 45 );    
-    
-    infix( "in", 50 );
-    
-    infix("+", 50);
-    infix("-", 50);
-
-    infix("*", 60);
-    infix("/", 60);
-    infix("%", 60);
-
-    var operatorType = {
-        '||': 'LogicalExpression',
-        '&&': 'LogicalExpression',
-        '^^': 'LogicalExpression',
-        '==': 'LogicalExpression'    
-    };
-    
-    prefix_infix( ".", 80, function (left) {
-        // infix version.
-        this.object = left;
-        if (token.id == '(' ) {
-            advance( '(' );
-            this.property = expression( 10 );
-            this.computed = true;
-            
-            var end = token;
-            advance( ')' );
-
-            this.range = [ ( this.object || this ).range[0], end.range[1] ];
-            this.loc = { start:  getLocStart( this.object || this ), end: getLocEnd( end ) };
-        }
-        else { 
-            token.arity = "literal";
-            this.property = token;
-            this.computed = false;
-            advance();
-
-            this.range = [ ( this.object || this ).range[0], this.property.range[1] ];
-            this.loc = { start:  getLocStart( this.object || this ), end: getLocEnd( this.property ) };
-        }   
-        
-        this.type = "MemberExpression";
-        this.arity = "binary";
-        return this;
-    } );
-
-    prefix_infix( "[", 80, function () {
-            var name = "", start = token;
-            
-            while( token.id === '.' || token.arity === 'name' ) { 
-                name += token.value;
-                advance();
-            }
-            
-            var end = token;
-            advance("]");
-            
-            this.first = name;
-            this.id = "xlate";
-            this.arity = "unary";
-            this.type = "XLateExpression";
-            this.range = [ start.range[0], end.range[1] ];
-            this.loc = { start:  getLocStart( start ), end: getLocEnd( end ) };
-            
-            return this;
-        }, 
-        function (left) {
-            
-            // first should resolve to some object.
-            this.object = left;
-
-            var range = clone( this );
-
-            if( token.id === ':' ) { 
-                // range specifier with empty start index.
-
-                this.fromIndex = null;
-                this.toIndex = null;
-                this.type = "RangeExpression";
-                
-                advance( ":" );
-                
-                if( token.id !== "]" ) { 
-                    this.toIndex = expression( 0 );
-                }
-            }
-            else {
-                // range/index specifier.
-                var e = expression(0);
-                
-                if( token.id === ":" ) { 
-                    // range specifier
-                    this.fromIndex = e;
-                    this.toIndex = null;
-                    this.type = "RangeExpression";
-                    
-                    advance( ":" );
-                                        
-                    if( token.id !== "]" ) { 
-                        this.toIndex = expression( 0 );
-                    }
-
-                    this.type = "RangeExpression";                    
-                }
-                else {
-                    // index specifier.
-                    this.index = e;
-                    this.type = "IndexExpression";
-                }
-            }
-
-            this.arity = "binary";
-            var end = token;
-            advance("]");
-            
-            this.range = [ this.object.range[0], end.range[1] ];
-            this.loc = { start:  getLocStart( this.object ), end: getLocEnd( end ) };
-
-            return this;
-    });
-
-    infix("(", 80, function (left) {
-        var a = [];
-        if (left.id === "." || left.id === "[") {
-            // function call on member or index
-            this.arity = "binary";
-            this.callee = left;
-            this.arguments = a;
-            this.type = "CallExpression";
-        } 
-        else {
-            this.arity = "binary";
-            this.callee = left;
-            this.arguments = a;
-            this.type = "CallExpression";
-            
-            if ((left.arity !== "unary" || left.id !== "function") &&
-                    left.arity !== "name" && left.id !== "(" &&
-                    left.id !== "&&" && left.id !== "||" && left.id !== "?" && left.id !== '$' && left.id !== '$$' ) {
-                token_error( left,"Expected a variable name.");
-            }
-        }
-        if (token.id !== ")") {
-            while (true) {
-                a.push(expression(0));
-                if (token.id !== ",") {
-                    break;
-                }
-                advance(",");
-            }
-        }
-        
-        var end = token;
-        advance(")");
-    
-        this.range = [ this.callee.range[0], end.range[1] ];
-        this.loc = { start: getLocStart( this.callee ), end: getLocEnd( end ) };        
-        
-        return this;
-    });
-    
-    prefixist("$$");
-    prefixist("$");
-    
-    prefix("!");
-    prefix("-");
-    
-    prefix( "#", function() { 
-        // this is a special case where the following 
-        // identifier should be treated as a literal
-        // hex value.
-        
-        if( token.arity === "name" && /^[a-fA-F0-9]+$/.test( token.value ) ) { 
-            this.arity = "literal";
-            this.value = "#" + token.value;
-            this.id = "(literal)";
-            this.type = "ObjRefLiteral";
-            
-            this.range = [ this.range[0], token.range[1] ];
-            this.loc = { start: getLocStart( this ), end: getLocEnd( token ) };        
-            
-            advance();
-        }
-        else { 
-            token_error( token, "Expected hexadecimal value" );
-        }
-        
-        return this;
-    } );
-    
-    // List literals
-
-    prefix("{", function () {
-        var a = [];
-        if (token.id !== "}") {
-            while (true) {
-                a.push(expression(0));
-                if (token.id !== ",") {
-                    break;
-                }
-                advance(",");
-            }
-        }
-        
-        var end = token;
-        advance("}");
-        
-        this.elements = a;
-        this.arity = "unary";
-        this.type = "ListExpression";
-        this.range = [ this.range[0], end.range[1] ];
-        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };        
-        
-        return this;
-    });
-
-    stmt( "goto", function() { 
-        if( token.arity === "name" ) { 
-            this.first = token;
-        }
-        else { 
-            token_error( token, "Expected label" );
-        }
-        this.arity = "unary";
-        return this;
-    } );
-    
-    // pure grouping...
-    prefix("(", function () {
-        var e = expression(0);
-        advance(")");
-        return e;
-    });
-
-    stmt( "function", function () {
-        var a = [];
-        var token1, nameToken;
-        
-        new_scope();
-        
-        // this token can be the return type or the function name...
-        if ( token.arity === "name") {
-            // either return type or name of function
-            token1 = token;
-            advance();
-        }
-        else {
-            token_error( token, "Expected name of function or return type" );
-        }
-        
-        if ( token.arity === "name" ) {
-            // This can only be the function name.
-            this.name = token.value;
-            this.returnType = token1.value;
-            nameToken = token;
-            advance();
-        }
-        else { 
-            // no return type for function -- the return type token becomes the function name.
-            this.name = token1.value;
-            nameToken = token1;
-        }
-        
-        // Don't define the function name -- OScript allows defining functions with names of types.
-        // scope.define( nameToken );
-        
-        // arguments...
-        advance("(");
-        if (token.id !== ")") {
-            while (true) {
-                if( token.arity === 'operator' && token.value === '...' ) { 
-                    // this must be the last argument.
-                    a.push(token);
-                    advance();
-                    break;
-                }
-                else if ( token.arity !== "name") {
-                    token_error( token,"Expected a parameter definition.");
-                }
-                
-                var varName, varType, t; 
-                
-                varType = token;
-                advance();
-
-                var param = {
-                    "dataType": null,
-                    "name": "", 
-                    "default": null
-                };
-                
-                if( token.arity === 'name' ) { 
-                    // variable name/type was supplied.
-                    varName = token;
-                    param.dataType = varType.value;
-                    advance();
-                }
-                else {
-                    // the varType was actually the name.
-                    varName = varType;
-                }
- 
-                scope.define(varName);
-                param.name = varName;
-                
-                if (token.id === "=") {
-                    advance("=");
-                    param["default"] = expression(0);
-                }
-                
-                a.push(param);
-                
-                if (token.id !== ",") {
-                    break;
-                }
-                advance(",");
-            }
-        }
-        this.params = a;
-        advance(")");
-
-        eos();
-
-        this.body = statements();
-
-        // keep a reference to the last token
-        var end = token;
-        advance("end");
-
-        this.arity = "function";
-        scope.pop();
-
-        this.eos = token;
-        eos();
-        
-        this.range = [ this.range[0], end.range[1] ];
-        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };        
-        this.type = "FunctionDeclaration";
-        
-        return this;
-    });
-
-    function declaration( varType ) { 
-        var a = [], n, t;
-        
-        var declarator = {
-            type: "VariableDeclaration",
-            declarations: a
-        };
-        
-        while (true) {
-            // n is name of variable.
-            n = token;
-            if (n.arity !== "name") {
-                token_error( n,"Expected a new variable name.");
-            }
-            
-            t = {
-                type: "VariableDeclarator",
-                name: n,
-                init: null,
-                dataType: varType
-            };
-            
-            scope.define(n);
-            advance();
-            
-            if (token.id === "=") {
-                // declaration with assignment.
-                advance("=");
-                t.init = expression(0);
-            }
-
-            a.push( t );
-            
-            if (token.id !== ",") {
-                break;
-            }
-            advance(",");
-        }
-        
-        var eosToken = token;
-        eos();
-        
-        declarator.range = [ varType.range[0], eosToken.range[0] ];
-        declarator.loc = { start: getLocStart( varType ), end: getLocStart( eosToken ) };
-        
-        return declarator;          
-    }
-    
-    builtinTypes.forEach( function( varType ) { 
-        symbol( varType );
-    } );
-
-    var ifElseIf = function() {
-        this.type = "IfStatement";
-        
-        this.test = expression(0);
-        eos();
-        
-        this.consequent = statements();
-        skip_newlines();
-      
-        if ( token.id === "elseif" ) {
-            
-            // The alternate will be an elseif statement.
-            this.alternate = statement();
-            
-            this.arity = "statement";
-            this.range = [ this.range[0], this.alternate.range[1] ];
-            this.loc = { start: getLocStart( this ), end: getLocEnd( this.alternate ) };
-            
-            // final 'end' has already been matched by the elseif.
-            return this;
-        }
-        else if (token.id === "else") {
-            advance("else");
-            eos();
-
-            // the alternate is an array of zero or more statements.
-            this.alternate = statements();
-        } 
-        
-        var end = token;
-        advance( "end" );
-        this.eos = token;
-        eos();
-        
-        this.range = [ this.range[0], end.range[1] ];
-        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };
-        
-        this.arity = "statement";
-        return this;
-    };
-     
-    stmt( "if", ifElseIf );
-    stmt( "elseif", ifElseIf ); 
-
-    stmt("return", function () {
-        if( token.id !== "(nl)" ) {
-            this.argument = expression(0);
-        } 
-        
-        eos();
-        
-        if ( token.id !== "end" && token.id !== 'elseif' && token.id !== 'else' && token.id !== '(end)' ) {
-            if( options.unreachable_code_errors ) { 
-                token_error( token, "Unreachable statement.");
-            }
-        }
-        
-        this.range = [ this.range[0], this.argument ? this.argument.range[1] : this.range[1] ];
-        this.loc = { start: getLocStart( this ), end: getLocEnd( this.argument || this ) };
-        this.type = "ReturnStatement";
-        this.arity = "statement";
-        return this;
-    });
-
-    stmt("break", function () {
-        eos();
-
-        if ( token.id !== "end" && token.id !== 'elseif' && token.id !== 'else' && token.id !== '(end)' ) {
-            if( options.unreachable_code_errors ) { 
-                token_error( token,"Unreachable statement.");
-            }
-        }
-        this.arity = "statement";
-        this.type = "BreakStatement";
-
-        return this;
-    });
-
-    stmt("breakif", function () {
-        this.first = expression( 0 );
-        this.eos = token;
-        eos();
-        
-        this.arity = "statement";
-        this.range = [ this.range[0], this.first.range[1] ];
-        this.loc = { start: getLocStart( this ), end: getLocEnd( this.first ) };
-        this.type = "BreakIfStatement";
-
-        return this;
-    });
-
-    stmt("continue", function () {
-        eos();
-
-        if ( token.id !== "end" && token.id !== 'elseif' && token.id !== 'else' && token.id !== '(end)' ) {
-            if( options.unreachable_code_errors ) {
-                token_error( token,"Unreachable statement.");
-            }
-        }
-
-        this.arity = "statement";
-        this.type = "ContinueStatement";
-        return this;
-    });
-
-    stmt("continueif", function () {
-        this.first = expression( 0 );
-        this.eos = token;
-        eos();
-        
-        this.arity = "statement";
-        this.range = [ this.range[0], this.first.range[1] ];
-        this.loc = { start: getLocStart( this ), end: getLocEnd( this.first ) };
-        this.type = "ContinueIfStatement";
-
-        return this;
-    });
-
-    stmt("while", function () {
-        
-        this.first = expression(0);
-        eos();
-        
-        this.body = statements();
-
-        var end = token;
-        advance("end");
-        
-        this.eos = token;
-        eos();
-        
-        this.arity = "statement";
-
-        this.range = [ this.range[0], end.range[1] ];
-        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };
-        this.type = "WhileStatement";
-        
-        return this;
-    });
-
-    stmt("repeat", function () {
-        eos();
-
-        this.body = statements();
-        
-        advance("until");
-        
-        this.second = expression(0);
-        
-        this.eos = token;
-        eos();
-        
-        this.arity = "statement";
-        this.range = [ this.range[0], this.second.range[1] ];
-        this.loc = { start: getLocStart( this ), end: getLocEnd( this.second ) };
-        this.type = "RepeatStatement";
-
-        return this;
-    });
-    
-    stmt( "for", function() { 
-    
-        if( token.id === '(' ) { 
-            advance( '(' );
-
-            // c-style for loop.
-            this.first = ( token.id !== '(nl)' ) ? expression(0) : null;
-            advance( '(nl)' );
-
-            this.second = ( token.id !== '(nl)' ) ? expression(0) : null;
-            advance( '(nl)' );
-
-            this.third = ( token.id !== ')' ) ? expression(0) : null;
-                        
-            advance( ')' );
-            eos();
-
-            this.body = statements();
-
-            this.id = "for_c";
-            this.type = "ForCStyleStatement";            
-        }
-        else if( token.arity === "name" ) { 
-            // for "x in" or for "x = 1 ..."            
-            
-            this.first = token;
-            advance();
-            
-            if( token.id === "=" ) { 
-                advance( '=' );
-                this.second = expression(0);
-                
-                if( token.id === 'to' || token.id === 'downto' ) {
-                    this.direction = token;
-                    advance();
-                }
-                
-                this.third = expression(0);
-                eos();
-                
-                this.body = statements();                
-                this.id = "for";
-                this.type = "ForStatement";            
-            }
-            else if( token.id === "in" ) { 
-                reverse();
-                this.first = expression( 0 );
-                eos();
-                
-                this.body = statements();
-                this.id = "for_in";
-                this.type = "ForInStatement";            
-            }
-            else {
-                token_error( token, "Unexpected token.  Expected 'in' or '='." );
-            }
-        }
-        else { 
-            token_error( token, "Unexpected token. Expected '(' or a variable name." );
-        }
-        
-        var end = token;
-        advance( "end" );
-        this.eos = token;
-        eos();
-        this.arity = "statement";
-
-        this.range = [ this.range[0], end.range[1] ];
-        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };
-
-        return this;
-    } );
-
-    stmt("switch", function() {
-        this.discriminant = expression(0);
-        eos();
-
-        var c, e, s, end;        
-        this.cases = [];
-        
-        while( true ) { 
-            if( token.id === "case" ) {
-                c = token;
-                c.test = [];
-                advance( "case" );
-
-                // match 1 or more case values separated by commas.
-                while( true ) { 
-                    e = expression(0);
-                    c.test.push( e );
-                    if( token.id !== "," ) {
-                        break;
-                    }
-                    advance( "," );
-                }
-            }
-            else if( token.id === "default" ){ 
-                c = token; 
-                c.test = null;
-                advance( "default" );
-            }
-            else break;
-
-            eos();
-
-            c.consequent = statements();
-            c.arity = "binary";
-            
-            // end of case or default
-            end = token;
-            advance( "end" );
-            
-            c.type = "SwitchCase";
-            c.range = [ c.range[0], end.range[1] ];
-            c.loc = { start: getLocStart( c ), end: getLocEnd( end ) };
-            
-            this.cases.push( c );
-            
-            eos();
-        }
-                
-        // end of switch
-        end = token;
-        advance( "end" );
-
-        this.eos = token;
-        eos();
-
-        this.arity = "statement";
-        this.range = [ this.range[0], end.range[1] ];
-        this.loc = { start: getLocStart( this ), end: getLocEnd( end ) };
-        this.type = "SwitchStatement";
-
-        return this;
-    });
-
-    reservedWords.forEach( function(r) { 
-        var t = symbol_table[r];
-        if( typeof t === "object" ) { 
-            t.reservedWord = true;
-        }
-    } );
-    
-    return { 
-    
-        getTokens: function() { 
-            return tokens;
-        },
-        
-        getSource: function() { 
-            return lex ? lex.getSource() : "";
-        },
-        
-        parse: function parse( source ) {   
-    
-            // reset state
-            scope = null;
-            token = null;
-            tokens = [];
-            token_nr = 0;
-            
-            // Init the lexer and read all the tokens into our token buffer.
-            lex = new Lexer( source );
-
-            var t;
-            
-            while( ( t = lex.get() ) !== null ) { 
-                tokens.push( t );
-            }
-         
-            // send through preprocessor...
-            tokens = preprocessor.run( tokens );
-            
-            // if the program doesn't end with some kind of end-of-statement character, add one.
-            if( tokens.length > 0 ) { 
-                var lastToken = tokens[tokens.length-1];
-                if( lastToken.type !== '(nl)' ) { 
-                    tokens.push( { 
-                        type: '(nl)', 
-                        value:'', 
-                        from: lastToken.to+1, 
-                        to:lastToken.to+1, 
-                        line:lastToken.line, 
-                        colFrom: lastToken.colTo+1,
-                        colTo: lastToken.colTo+1 } );
-                }
-            }
-                        
-            // init and parse.
-            new_scope();
-            advance();
-            
-            // eat any beginning whitespace...
-            skip_newlines();
-            
-            var s = statements();
-            advance("(end)");
-            scope.pop();
-            return s;
-        }
-    };
-}
-
-module.exports = make_parser;
-
-
-},{"./lexer":13,"./preprocessor":16,"./util":17,"clone":2}],16:[function(require,module,exports){
-// preproccessor.js
-var util = require( './util' ),
-    DirectiveStack = require( './directive_stack' ),
-    Macros = require( './macros' );
-    
-var token_error = function ( t, message ) {
-    t.type = "SyntaxError";
-    t.message = message || "Unknown or erroneous preproccessor directive";
-    throw t;
-};
-
-var macros,
-    directiveStack,
-    tokens = [],
-    token = null,
-    tokenIndex = 0,
-    findDirective = true,
-    results = [],
-    usingTokens = true;
-
-var advance = function( evalToken ) { 
-    if( token && evalToken && directiveStack.on() ) {
-        if( macros.isDefined( token ) ) { 
-            try {
-                results.push.apply( results, macros.evaluate( token ) );
-            }
-            catch( e ) { 
-                token_error( token, "Recursive macro definition can't be evaluated" );
-            }
-        }
-        else {
-            results.push( token );
-        }
-    }   
-    
-    if( tokenIndex >= tokens.length ) { 
-        token = null;
-        return;
-    }        
-    
-    token = tokens[tokenIndex++];
-};
-
-function isValidMacroName( tok ) { 
-    return tok && tok.type === 'name';
-}
-
-var directives = { 
-    "define": function(t,args) {
-        if( directiveStack.on() ) { 
-            if( isValidMacroName( args[0] ) ) { 
-                macros.define( args[0], args.slice( 1 ) );
-            }
-        }
-    },
-    "undef": function(t,args) { 
-        if( directiveStack.on() ) { 
-            macros.undef( args[0] );
-        }
-    },
-    "ifdef": function(t,args) { 
-        directiveStack.push( macros.isDefined( args[0] ) );
-    },
-    "ifndef": function(t, args ) { 
-        directiveStack.push( !macros.isDefined( args[0] ) );
-    },
-    "else": function(t,args) {             
-        if( directiveStack.empty() ) {
-            token_error(t);
-        }
-        directiveStack.invert();
-    },
-    "endif": function(t,args) { 
-        if( directiveStack.empty() ) {
-            token_error( t );
-        }
-        directiveStack.pop();
-    }
-};
-
-function directive() { 
-    if( token.type === 'name' ) { 
-        var t = token,
-            v = t.value.toLowerCase(),
-            dir = directives[ v ],
-            params = [];
-            
-        // collect all tokens until eol.
-        while( true ) { 
-            advance(false);
-            
-            if( !token ) {
-                break;
-            }
-            else if ( isNewline( token ) ) {
-                advance(false);
-                break;
-            }
-
-            params.push( token );
-        }
-        
-        // process the directive.
-        if( dir ) { 
-            dir( t, params );
-        }
-        else if( directiveStack.on() ) {
-            // throw error if we're collecting tokens.
-            token_error( token );
-        }
-    }
-    else {
-        if( directiveStack.on() ) { 
-            // this is an error if we're collecting tokens.
-            token_error( token );
-        }
-        else {      
-            // if we're not collecting tokens, we can skip to end of line.
-            while( token && !isNewline( token ) ) { 
-                advance(false);
-            }
-            
-            if ( isNewline( token ) ) {
-                // one more.
-                advance(false);
-            }
-        }
-    }
-}    
-
-function isNewline( t ) { 
-    return t && t.type === "(nl)" && t.value !== ';';
-}
-
-function preprocess(tokenList) { 
-    // reset our globals
-    directiveStack = new DirectiveStack();
-    
-    macros = new Macros( { 
-                    canEvalItem: isValidMacroName, 
-                    valueFn: function(t) { return typeof( t ) === 'undefined' ? null : t.value; } 
-                } );
-    
-    tokens = tokenList;
-    tokenIndex = 0;
-    token = null;
-    results = [];
-
-    // start by finding directives
-    var findDirective = true;
-
-    // load first token.
-    advance();
-
-    while( token ) { 
-        if( findDirective ) { 
-            // # - is a directive line.
-            // Real newlines are skipped.
-            // Any other token switches to normal processing...
-            
-            if( token.type === 'operator' && token.value === '#' ) { 
-                advance(false);
-                directive();
-            }
-            else if( isNewline( token ) ) { 
-                advance(true);
-            }
-            else { 
-                // process this token in the next loop.
-                findDirective = false;
-            }
-        }
-        else {
-            // normal code mode... newlines switch the state back to finding directives.
-            if( token.type === "(nl)" && token.value !== ';' ) {
-                findDirective = true;
-            }
-            advance(true);
-        }
-    }
-    
-    return results;
-}
-
-module.exports = { 
-    run: preprocess
-};
-
-},{"./directive_stack":10,"./macros":14,"./util":17}],17:[function(require,module,exports){
-function flatten(arr) { 
-    var numItems = arr.length, i = -1, rtn = [], rIndex = 0;
-    while( ++i < numItems ) {
-        var a = arr[i], j = -1, aLen = a.length;
-        while( ++j < aLen ) {
-            rtn[rIndex++] = a[j];
-        }
-    }
-    return rtn;
-}
-
-function indexOf( array, value, fromIndex ) {
-    var index = (fromIndex || 0) - 1,
-        length = array ? array.length : 0;
-
-    while (++index < length) {
-      if (array[index] === value) {
-        return index;
-      }
-    }
-    return -1;
-}
-
-function unique(arr) {
-    if( arr.unique ) {
-        return arr.unique();
-    }
-    var i = -1, result = [], arrLen = arr.length, v;
-    while( ++i < arrLen ) { 
-        v = arr[i];
-        if( indexOf( result, v ) < 0 ) {
-            result.push( v );
-        }
-    }
-    return result;
-}
-
-function union() { 
-    return unique( flatten( arguments ) );
-}
-
-function compact(array) {
-    var index = -1,
-        length = array ? array.length : 0,
-        result = [];
-
-    while (++index < length) {
-        var value = array[index];
-        if (value) result.push(value);
-    }
-    return result;
-}
-
-var isArray = Array.isArray || function(arg) {
-    return Object.prototype.toString.call(arg) === '[object Array]';
-};
-
-module.exports = { 
-    union: union,
-    unique: unique,
-    indexOf: indexOf,
-    flatten: flatten,
-    isArray: isArray,
-    compact: compact
-};
-},{}]},{},[1,8,9,10,11,12,13,14,15,16,17]);
+},{"./compare":15,"./edits":17,"lodash":14}]},{},[1,15,16,17,18]);

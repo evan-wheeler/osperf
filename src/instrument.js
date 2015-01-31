@@ -1,8 +1,8 @@
 // instrument.js
 
-var util = require( './util' ),
-    partialCompare = require( './compare' ),
-    EditList = require( './edits' );
+var partialCompare = require( './compare' ),
+    EditList = require( './edits' ),
+    _ = require( 'lodash' );
 
 function isInstrumented( funcBody ) {
 
@@ -95,7 +95,7 @@ function instrument( scriptRefStr, code, parseTree, manglerFn ) {
     
     // walk the top level looking for functions...
     var editsList = new EditList( code ),
-        statements = util.isArray( parseTree ) ? parseTree : [ parseTree ];
+        statements = _.isArray( parseTree ) ? parseTree : [ parseTree ];
     
     var alreadyInstrumented = false;
     
@@ -146,7 +146,7 @@ function instrumentReturns( editList, funcID, code, node ) {
             return;
         }
         
-        children = util.isArray( node ) ? node : util.compact( [ node.left, node.right, node.body, node.consequent, node.alternate, node.cases ] );
+        children = _.isArray( node ) ? node : _.compact( [ node.left, node.right, node.body, node.consequent, node.alternate, node.cases ] );
         
         children.forEach( function( n ) { 
             instrumentReturns( editList, funcID, code, n );

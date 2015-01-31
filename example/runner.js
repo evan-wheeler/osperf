@@ -1,5 +1,5 @@
-var Parser = require( '../src/parser' ),
-    Lexer = require( '../src/lexer' ),
+var Parser = require( 'bannockburn' ),
+    Lexer = Parser.Lexer,
     instrument = require( '../src/instrument' ),
     coverage = require( '../src/coverage' ),
     _ = require( 'lodash' );
@@ -81,8 +81,8 @@ function go(source) {
         tree = parser.parse( source );
         endTime = performance.now();
 
-        var validValues = [ "type", 'id', 'value', "default", "name", 'operator', 'left', 'right', 'argument', 'init', "test", 'first', 'second', 'third', 'fourth', 'direction', 'label', 'declaration', "dataType",  "kind", "returnType" ];
-        var groupValues = [ "params", "arguments", "body", "consequent", "alternate", "elements", "expression", "declarations", "declarations" ];
+        var validValues = [ "type", 'id', 'value', "default", "name", 'operator', 'left', 'right', 'argument', 'init', "test", 'first', 'second', 'third', 'fourth', 'direction', 'label', 'declaration', "dataType",  "kind", "returnType", "discriminant" ];
+        var groupValues = [ "cases", "params", "arguments", "body", "consequent", "alternate", "elements", "expression", "declarations", "declarations" ];
         
         validValues = validValues.concat( groupValues );
         

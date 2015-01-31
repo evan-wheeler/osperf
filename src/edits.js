@@ -3,6 +3,23 @@ var Edits = module.exports = function Edits(initialValue) {
     this.edits = [];
 };
 
+function findIndent( code, pos ) { 
+    var indentStr = "";
+    while( --pos > 0 ) {
+        var ch = code[pos];
+        switch( ch ) { 
+            case '\t': case ' ':
+                indentStr = ch + indentStr;
+                break;
+            case '\n': case '\r':
+                return indentStr;
+            default: 
+                indentStr = "";
+        }
+    }
+    return indentStr;
+}
+
 Edits.prototype.apply = function applyEdits() { 
     var edits = this.edits,
         code = "" + this.origValue;
@@ -27,6 +44,19 @@ Edits.prototype.apply = function applyEdits() {
     return buffers.join( "" );
 };
 
-Edits.prototype.insert = function( str, beforeIndex ) { 
+Edits.prototype.insert = function( str, beforeIndex, options ) { 
+    options = options || {};
+    
+    if( options.indent ) { 
+        var indent = findIndent( this.origValue, beforeIndex );
+        
+        if( options.indent === "after" ) { 
+            str += indent;
+        }
+        else { 
+            str = indent + str;
+        }
+    }
+
     this.edits.push( { insert_pos: beforeIndex, content: str } );
 };

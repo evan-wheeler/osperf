@@ -1,0 +1,1 @@
+node index.js -s "c:/opentext/sharedsc/@(syntergycore|replicator)/ospace_src/**/!(__init|__Init|Startup|0[_a-zA-Z0-9]*).Script" 
