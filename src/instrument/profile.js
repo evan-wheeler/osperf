@@ -1,7 +1,7 @@
-var compare = require( './compare' ),
+var compare = require( './../compare' ),
     EditList = require( './edits' ),
     _ = require( 'lodash'),
-    Walker = require( '../../bannockburn').Walker;
+    Walker = require( '../../.').Walker;
 
     // Walker = require( './walker' );
 
@@ -35,15 +35,9 @@ function isSimpleOp( node ) {
     return false;
 }
 
-function defaultMangler( scriptRefStr, funcName ) { 
-    return scriptRefStr + funcName;
-}
-
-function instrument( scriptRefStr, code, parseTree, manglerFn ) { 
+function instrument( code, parseTree, idGenerator ) {
     // walk the parse tree and add code at the beginning of each function definition, before 
     // each return function, and at the end of each function body.
-    
-    manglerFn = manglerFn || defaultMangler;
     
     // walk the top level looking for functions...
     var editList = new EditList( code),
@@ -58,10 +52,10 @@ function instrument( scriptRefStr, code, parseTree, manglerFn ) {
                 return false;
             }
 
-            funcID = manglerFn( scriptRefStr, func.name );
+            funcID = idGenerator( func.name );
 
             editList.insert( {
-                str: instrCode.enter( {funcID: funcID } ),
+                str: instrCode.enter( { funcID: funcID } ),
                 pos: this.getStartPos( body[0] ),
                 indent: "after"
             } );

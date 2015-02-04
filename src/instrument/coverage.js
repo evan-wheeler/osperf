@@ -1,4 +1,5 @@
 var EditList = require( './edits' ),
+    Walker = require( '../../../Bannockburn').Walker,
     _ = require( 'lodash' );
 
 /** 
@@ -46,8 +47,8 @@ Block.TYPES = {
 };
 
 
-function defaultIDGenerator( functionName, blockIndex ) {
-    return functionName + "[" + blockIndex + "]";
+function defaultIDGenerator( info ) {
+    return info.func + "[" + info.block + "]";
 }
 
 /**
@@ -123,7 +124,10 @@ function BlockTracker( options ) {
         }
         
         if( line > -1 && insertPos > -1 ) { 
-            var blockID = idGenerator.call( scope, curFunction, blockIndex++ ),
+            var blockID = idGenerator.call( scope, {
+                    func: curFunction,
+                    block: blockIndex++
+                } ),
                 block = new Block( type, blockID, line );
             
             if( blockStack.length > 0 ) { 
@@ -180,17 +184,13 @@ function skipTraverse() { return false; }
 
 var VISIT_TMPL = _.template( "__cov.('<%= id %>')+=1\n");
 
-module.exports = function coverage( scriptID, src, parseNode, options ) {
-
-    options = options || {};
+module.exports = function coverage( src, parseNode, idGenerator ) {
 
     var editList = new EditList( src),
-        functions = {};
+        functions = [];
 
     var ctx = new BlockTracker( {
-        idGenerator: options.idGenerator || function( functionName, blockIndex ) {
-            return scriptID + functionName + "[" + blockIndex + "]";
-        },
+        idGenerator: idGenerator,
         visitFn: function( block, insertPos ) {
             editList.insert( VISIT_TMPL( block ), insertPos, "after" );
         }
@@ -205,7 +205,7 @@ module.exports = function coverage( scriptID, src, parseNode, options ) {
 
     function forLoop( node, body ) {
         ctx.addLine( this.getStartLine( node ), this.getStartPos( node ) );
-        ctx.startBlock( Block.TYPES.LOOP, this.getStartLine( body[0] ), this.getStartPos(  body[0] ) );
+        ctx.startBlock( Block.TYPES.LOOP, this.getStartLine( body[0] ), this.getStartPos( body[0] ) );
     }
 
     function breakContFn( node ) {
@@ -229,35 +229,44 @@ module.exports = function coverage( scriptID, src, parseNode, options ) {
     // make these callbacks do nothing but not cancel.
     walker.on( [ "FunctionDeclaration",
         "IfStatement", "ElseifStatement",
-        "ForStatement", "ForCStyleStatement", "ForInStatement" ], noop );
+        "ForStatement", "ForCStyleStatement", "ForInStatement"
+    ], noop );
 
     // these callbacks end blocks
     walker.on( [
         'after:ForStatement.body', 'after:ForCStyleStatement.body', 'after:ForInStatement.body',
         'after:IfStatement.consequent', 'after:ElseifStatement.consequent',
-        'after:SwitchCase.consequent', 'after:RepeatStatement.body', 'after:WhileStatement:body'  ], endBlock );
+        'after:SwitchCase.consequent', 'after:RepeatStatement.body', 'after:WhileStatement.body'
+    ], endBlock );
 
     // cancel traversal.
     walker.on( [
         'before:FunctionDeclaration.params',
         'before:ElseifStatement.test',
         'before:SwitchCase.test',
-        'before:RepeatStatement.test'], skipTraverse );
+        'before:RepeatStatement.test',
+        'before:ForStatement.first', 'before:ForStatement.second', 'before:ForStatement.third',
+        'before:ForInStatement.first',
+        'before:ForCStyleStatement.first', 'before:ForCStyleStatement.second', 'before:ForCStyleStatement.third',
+    ], skipTraverse );
 
     // handle loops
     walker.on( [
         'before:WhileStatement.body', 'before:RepeatStatement.body',
-        'before:ForStatement.body', 'before:ForInStatement.body', 'before:ForCStyleStatement' ], forLoop );
+        'before:ForStatement.body', 'before:ForInStatement.body', 'before:ForCStyleStatement.body'
+    ], forLoop );
 
     // handle break/continue.
     walker.on( [
-        'BreakStatement', 'ContinueStatement', 'BreakIfStatement', 'ContinueIfStatement' ], breakContFn );
+        'BreakStatement', 'ContinueStatement', 'BreakIfStatement', 'ContinueIfStatement'
+    ], breakContFn );
 
     walker.on( {
         'before:FunctionDeclaration.body': function( node, body ) {
             ctx.setFunction( node.name );
             editList.insert( "Assoc __cov = Assoc.CreateAssoc( 0 )\n", this.getStartPos( body[0] ), "after" );
-            functions[node.name] = ctx.startBlock( Block.TYPES.FUNCTION, this.getStartLine( node ), this.getStartPos( body[0] ) );
+            var funcBlock = ctx.startBlock( Block.TYPES.FUNCTION, this.getStartLine( node ), this.getStartPos( body[0] ) );
+            functions.push( funcBlock.id );
         },
 
         'after:FunctionDeclaration.body': function( node, body ) {
@@ -306,13 +315,16 @@ module.exports = function coverage( scriptID, src, parseNode, options ) {
         }
     }).start( parseNode );
 
-    if( options.debug ) {
+    var debug = false;
+    if( debug ) {
         var blockSummary = ctx.getBlocks().map( function(b) {
             return b.id + " -> Ranges: " + JSON.stringify( b.ranges );
         } ).join( "\n" );
 
         editList.insert( "/*\n" + blockSummary + "\n*/\n", src.length );
     }
+
+    // convert block data to
 
     return {
         result: editList.apply(),
