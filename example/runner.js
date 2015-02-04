@@ -1,8 +1,14 @@
-var Parser = require( 'bannockburn' ),
-    Lexer = Parser.Lexer,
-    instrument = require( '../src/instrument' ),
+var Bannockburn = require( '../../bannockburn'),
+    profiler = require( '../src/profile' ),
     coverage = require( '../src/coverage' ),
     _ = require( 'lodash' );
+
+var Lexer = Bannockburn.Lexer,
+    Parser = Bannockburn.Parser,
+    Walker = Bannockburn.Walker;
+
+window.Walker = Walker;
+window.Parser = Parser();
 
 function doLexer(src) { 
     'use strict';
@@ -53,9 +59,10 @@ function displayLexResults( tokens ) {
         li.textContent = tokenText( t );
 
         $( li ).attr( { 
-            "d-row": "" + (t.line-1), // line is one based -- make zero based row.
-            "d-col-from": t.colFrom, 
-            "d-col-to": t.colTo + 1 // currently inclusive -- set to 1 passed.  
+            "d-row-from": "" + (t.loc.start.line-1), // line is one based -- make zero based row.
+            "d-row-to": "" + (t.loc.end.line-1), // line is one based -- make zero based row.
+            "d-col-from": t.loc.start.col,
+            "d-col-to": t.loc.end.col + 1 // currently inclusive -- set to 1 passed.
         } );
 
         frag.appendChild(li);
@@ -97,18 +104,30 @@ function go(source) {
         }        
         
         msg = JSON.stringify( tree, validValues, 3 );
+
+        $( '#error').hide();
+
+        document.getElementById( 'results' ).innerHTML = msg
+            .replace(/&/g, '&amp;')
+            .replace(/[<]/g, '&lt;');
+
     } catch (e) {
         endTime = performance.now();
-        msg = JSON.stringify( e );
+
+        var positionInfo = "";
+
+        if(e.token )  {
+            positionInfo = ", line: " + e.token.loc.start.line + ", column: " + e.token.loc.start.col;
+        }
+
+        $( '#error').html(e.name + ": " + e.message + positionInfo );
+        $( '#error').show();
     }
     
     displayLexResults( parser.getTokens() );    
     
     document.getElementById( "parseTime" ).innerHTML = "Parse: " + ( endTime - beginTime ).toFixed( 2 ) + " ms";
     
-    document.getElementById( 'results' ).innerHTML = msg
-            .replace(/&/g, '&amp;')
-            .replace(/[<]/g, '&lt;');
 }
 
 function doInstrument(editor) {
@@ -117,7 +136,7 @@ function doInstrument(editor) {
     
     try {
         var tree = parser.parse( source );
-        var result = instrument( "path.", parser.getSource(), tree );
+        var result = profiler( "path.", parser.getSource(), tree );
         editor.setValue( result );
     } catch (e) {
         window.alert( e.message );
@@ -130,8 +149,12 @@ function doCodeCoverage(editor) {
     
     try {
         var tree = parser.parse( source );
-        var result = coverage( "path.", parser.getSource(), tree );
-        editor.setValue( result );
+        var result = coverage( "path.", parser.getSource(), tree, { debug: true } );
+        editor.setValue( result.result );
+
+        console.log( "Functions: ", result.functions );
+        console.log( "Blocks: ", result.blocks );
+
     } catch (e) {
         window.alert( e.message );
     }
@@ -139,6 +162,7 @@ function doCodeCoverage(editor) {
 
 $( function() { 
     var editor = ace.edit("editor");
+    editor.setTheme( "ace/theme/eclipse" );
 
     function doParse() { 
         var v = editor.getValue();
@@ -152,14 +176,15 @@ $( function() {
 
         var $el = $( this );
         
-        var row = parseInt( $el.attr( 'd-row' ),10 ),
-            fromCol = parseInt( $el.attr( 'd-col-from' ), 10 ), 
+        var fromRow = parseInt( $el.attr( 'd-row-from' ),10 ),
+            toRow = parseInt( $el.attr( 'd-row-to' ), 10 ),
+            fromCol = parseInt( $el.attr( 'd-col-from' ), 10 ),
             toCol = parseInt( $el.attr( 'd-col-to' ), 10 );
         
         var sel = editor.selection;
-        var newSel = { start: { row: row, column: fromCol }, end: { row: row, column: toCol } };
+        var newSel = { start: { row: fromRow, column: fromCol }, end: { row: toRow, column: toCol } };
         
-        editor.scrollToLine( row, false, true, function() {} );
+        editor.scrollToLine( fromRow, false, true, function() {} );
         sel.setSelectionRange( newSel );
         editor.focus();
     } );
@@ -177,7 +202,12 @@ $( function() {
     } );
     
     $( '#wrapNL,#indexBased,#lineColBased' ).click( doParse );
-    
+
+    editor.selection.on( 'changeCursor', function() {
+        var pos = editor.getCursorPosition();
+        $( '#cursor-pos').html( "Line: " + (1+pos.row) + ", Col: " + pos.column );
+    } );
+
     var throttledParse = _.debounce( doParse, 1000 );
     editor.on( 'change', throttledParse );
     

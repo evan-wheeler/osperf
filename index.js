@@ -1,6 +1,8 @@
+#!/usr/bin/env node
+
 var fs = require( 'fs' ),
-    Parser = require( './src/parser' ),
-    instrument = require( './src/instrument' ),
+    Bannockburn = require( '../bannockburn' ),
+    profiler = require( './src/profile' ),
     glob = require("glob"),
     program = require('commander'),
     async = require( 'async' ),
@@ -12,19 +14,46 @@ function collect(val, list) {
   return list;
 }
 
+var VERSION = "0.0.1";
+
+var Parser = Bannockburn.Parser;
+
+program.version( VERSION )
+    .option( "-b, --base <path>", "Use base source control directory", "c:/opentext/sharedsc/" )
+    .option( "-s, --search <glob>", "Use search pattern to include files to be instrumented" )
+
+
+program.command( "profile <modules...>")
+    .description( "Instrument modules with profiling instructions.")
+    .action( function( mods ) {
+        console.log( "Adding profiling data for modules: ", mods );
+    } );
+
+program.command( "cover <modules...>")
+    .description( "Instrument modules with coverage instructions.")
+    .action( function( mods ) {
+        console.log( "Adding coverage data for modules: ", mods );
+    } );
+
+program.parse( process.argv );
+
+return;
+
 // By default, ignores Documentation.Script, /__Init.Script, Root/Startup.Script, and scripts that begin with a number.
 
+/*
 var defaultIgnore = /.*(?:(?:[\\/][ a-zA-Z0-9_]+[ ]?Root[\\/]Startup)|(?:[\\/]\_\_[Ii]nit)|([\\/][0-9][0-9a-zA-Z_]*)|(?:[\\/]Documentation))\.Script$/,
     defaultProfilerFile = /.*[\\/][ a-zA-Z0-9_]+[ ]?Root[\\/]Startup\.Script$/;
+*/
 
-program.version('0.0.1')
-    .option( '-s, --search <pattern>', 'Instrument files that match the specified glob [**/*.Script]', '**/*.Script' )
-    .option( '--profiler <regex>', 'Create profiler globals in files matching <regex>', defaultProfilerFile )
-    .option( '-i, --ignore <regex>', 'Do not instrument files matching <regex>', defaultIgnore )
-    .option( '-u, --uncompressed', "Do not compress function identifiers" )
-    .option( '-m, --mapfile <file>', "Write uncompressed function identifiers to <file>" )
-    .option( "-v, --verbose", "Turn on verbose output" )
-    .parse(process.argv);
+//program.version('0.0.1')
+//    .option( '-s, --search <pattern>', 'Instrument files that match the specified glob [**/*.Script]', '**/*.Script' )
+//    .option( '--profiler <regex>', 'Create profiler globals in files matching <regex>', defaultProfilerFile )
+//    .option( '-i, --ignore <regex>', 'Do not instrument files matching <regex>', defaultIgnore )
+//    .option( '-u, --uncompressed', "Do not compress function identifiers" )
+//    .option( '-m, --mapfile <file>', "Write uncompressed function identifiers to <file>" )
+//    .option( "-v, --verbose", "Turn on verbose output" )
+//    .parse(process.argv);
 
 var mangler = null,
     getMangledIDs = null;
@@ -46,9 +75,9 @@ function Mangler() {
     }
     
     return { 
-        assigner: function(scriptPath, functionName) { 
+        assigner: function() {
             var fID = compress( nextID++ );
-            idToName[fID] = scriptPath + functionName;
+            idToName[fID] = _.toArray( arguments ).join ("");
             return fID;
         },
         getIDs: function() { 
@@ -126,7 +155,7 @@ function startParse( path, donecb ) {
 }
 
 function onReadFile( path, contents, donecb ) { 
-    var p = Parser( [] ), parseTree, funcID;
+    var p = Parser(), parseTree, funcID;
     
     try { 
         parseTree = p.parse( contents );
@@ -138,7 +167,7 @@ function onReadFile( path, contents, donecb ) {
         return;
     }
 
-    var instrumentedCode = instrument( funcID, contents, parseTree, mangler );
+    var instrumentedCode = profiler( funcID, contents, parseTree, mangler );
     
     fs.writeFileSync( path, instrumentedCode, { encoding: 'utf8' } );
     

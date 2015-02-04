@@ -1,5 +1,4 @@
-var partialCompare = require( './compare' ),
-    EditList = require( './edits' ),
+var EditList = require( './edits' ),
     _ = require( 'lodash' );
 
 /** 
@@ -35,7 +34,6 @@ Block.prototype.addLine = function( line ) {
 
 /**
  * Interrupts the current range. 
- * @param line  Resets the end marker for the block
  */
 Block.prototype.interrupt = function() {
     this.interrupted = true;
@@ -48,18 +46,27 @@ Block.TYPES = {
 };
 
 
+function defaultIDGenerator( functionName, blockIndex ) {
+    return functionName + "[" + blockIndex + "]";
+}
+
 /**
  * Creates a BlockTracker, which is used to keeps track of the code coverage blocks
  * @class
  */
-function BlockTracker( scriptID, editList, idGenerator ) { 
-    
-    var functions = [],
-        curFunction = null,
+function BlockTracker( options ) {
+
+    options = options || {};
+
+    var curFunction = null,
         blockStack = [],
         blocks = [],
         blockIndex = 0,
         rawScript = false;
+
+    var idGenerator = options.idGenerator || defaultIDGenerator,
+        visitFn = options.visitFn,
+        scope = options.scope || this;
     
     /** 
      * Sets the current function.
@@ -116,7 +123,7 @@ function BlockTracker( scriptID, editList, idGenerator ) {
         }
         
         if( line > -1 && insertPos > -1 ) { 
-            var blockID = idGenerator( scriptID, curFunction, blockIndex++ ),
+            var blockID = idGenerator.call( scope, curFunction, blockIndex++ ),
                 block = new Block( type, blockID, line );
             
             if( blockStack.length > 0 ) { 
@@ -125,13 +132,14 @@ function BlockTracker( scriptID, editList, idGenerator ) {
             
             blockStack.push( block );
             blocks.push( block );
-                
-            // make the edit.
-            editList.insert( "$_C.v('" + blockID + "')\n", insertPos, { indent: "after" } );
+
+            // add the visit mark here.
+            visitFn.call( options.scope, block, insertPos );
+            // editList.insert( "$_C.v('" + blockID + "')\n", insertPos, "after" );
+
+            return block;
         }
-        else {
-            throw Error( "Invalid startBlock argument(s): " + JSON.stringify( arguments ) );
-        }
+        throw Error( "Invalid startBlock argument(s): " + JSON.stringify( arguments ) );
     };
     
     /** 
@@ -167,205 +175,148 @@ function BlockTracker( scriptID, editList, idGenerator ) {
     };
 }
 
-/* Helper Functions */
-    
-/**
- * Normalize a node that may be a (empty?) array of statements, 
- * a single item, or a null value. 
- * Return a non-empty array, or null.
- * @param {Array|Object} variant
- */
-function normalBlk( variant ) {
-    if( _.isArray( variant ) ) { 
-        return variant.length ? variant : null;
-    }   
-    return variant ? [ variant ] : null;
-}
+function noop() { return true; }
+function skipTraverse() { return false; }
 
-/**
- * Returns the line associated with a parse node's start location
- * @param {Object} node - The node
- */
-function startLine( node ) { 
-    return node.loc.start.line;
-}
+var VISIT_TMPL = _.template( "__cov.('<%= id %>')+=1\n");
 
-/**
- * Returns the character index associated with a parse node's start location
- * @param {Object} node - The node
- */
-function startPos( node ) { 
-    return node.range[0];
-}
-    
-/* Statement Types */
-    
-var statementTypes = {};
-    
-statementTypes.FunctionDeclaration = function( node, ctx ) { 
-
-    ctx.setFunction( node.name );
-
-    var funcBody = normalBlk( node.body );
-    
-    if( funcBody ) { 
-        ctx.startBlock( Block.TYPES.FUNCTION, startLine( node ), startPos( funcBody[0] ) );
-        walkTree( funcBody, ctx );
-        ctx.endBlock();
-    }
-};
-    
-statementTypes.IfStatement = function( node, ctx ) { 
-
-    ctx.addLine( startLine( node ), startPos( node ) );
-    walkTree( node.test, ctx );
-    
-    var consequent = normalBlk( node.consequent );
-    if( consequent ) { 
-        ctx.startBlock( Block.TYPES.OTHER, startLine( consequent[0] ), startPos( consequent[0] ) );
-        walkTree( consequent, ctx );
-        ctx.endBlock();
-    }
-    
-    var alt = node.alternate;
-    if( alt ) { 
-        if( _.isArray( alt ) ) { 
-            if( alt.length ) { 
-                // ELSE: add alternate block.
-                ctx.startBlock( Block.TYPES.OTHER, startLine( alt[0] ), startPos( alt[0] ) );
-                walkTree( alt, ctx );
-                ctx.endBlock();
-            }
-        }
-        else { 
-            // ELSEIF: block will be handled inside.
-            walkTree( alt, ctx );
-        }
-    }
-};
-
-statementTypes.ForStatement = statementTypes.ForCStyleStatement = function( node, ctx ) { 
-    
-    ctx.addLine( startLine( node ), startPos( node ) );
-    walkTree( [ node.first, node.second, node.third ], ctx ); 
-    
-    var body = normalBlk( node.body );
-        
-    if( body ) { 
-        ctx.startBlock( Block.TYPES.LOOP, startLine( body[0] ), startPos( body[0] ) );
-        walkTree( body, ctx );
-        ctx.endBlock();
-    }
-};
-
-statementTypes.ForInStatement = function( node, ctx ) { 
-
-    ctx.addLine( startLine( node ), startPos( node ) );
-    walkTree( [ node.first, node.second ], ctx ); 
-    
-    var body = normalBlk( node.body );
-        
-    if( body ) { 
-        ctx.startBlock( Block.TYPES.LOOP, startLine( body[0] ), startPos( body[0] ) );
-        walkTree( body, ctx );
-        ctx.endBlock();
-    }
-};
-
-statementTypes.SwitchStatement = function( node, ctx ) { 
-    ctx.addLine( startLine( node ), startPos( node ) );
-    walkTree( node.discriminant, ctx ); 
-    walkTree( normalBlk( node.cases ), ctx );
-};
-
-statementTypes.SwitchCase = function( node, ctx ) { 
-    var consequent = normalBlk( node.consequent );
-        
-    if( consequent ) { 
-        ctx.startBlock( Block.TYPES.OTHER, startLine( consequent[0] ), startPos( consequent[0] ) );
-        walkTree( consequent, ctx );
-        ctx.endBlock();
-    }
-};
-
-statementTypes.BreakStatement = function( node, ctx ) { 
-    ctx.addLine( startLine( node ), startPos( node ) );
-    
-    // reset the closest loop.
-    ctx.resetBlockType( Block.TYPES.LOOP );
-};
-
-statementTypes.BreakStatement = statementTypes.ContinueStatement = function( node, ctx ) { 
-    ctx.addLine( startLine( node ), startPos( node ) );
-    
-    // reset the closest loop.
-    ctx.resetBlockType( Block.TYPES.LOOP );
-};
-
-statementTypes.ContinueIfStatement = statementTypes.BreakIfStatement = function( node, ctx ) { 
-    ctx.addLine( startLine( node ), startPos( node ) );
-    walkTree( node.first, ctx );
-    
-    // reset the closest loop.
-    ctx.resetBlockType( Block.TYPES.LOOP );
-};
-
-statementTypes.ReturnStatement = function( node, ctx ) { 
-    ctx.addLine( startLine( node ), startPos( node ) );
-    walkTree( node.argument, ctx );
-    
-    // reset the closest loop.
-    ctx.resetBlockType( Block.TYPES.FUNCTION );
-};
-
-statementTypes.OtherStatements = function( node, ctx ) { 
-    ctx.addLine( startLine( node ), startPos( node ) );
-
-    [ 'argument', 'expression', 'init', 'elements', 'left', 'right', 'first', 'second', 'third', 'fourth', 'body', 'alternate' ].forEach( function( v ) {
-        if( node[v] ) { 
-            walkTree( node[v], ctx );
-        }
-    } );    
-};
-
-/** 
- * Walks a parse tree and discovers code blocks
- * along the way.
- * @param parseTree A node or array of nodes
- * @param ctx  The parsing context class.   
- */
-function walkTree( parseTree, ctx ) {
-    var statements = normalBlk( parseTree );
-    
-    if( statements ) { 
-        statements.forEach( function( n ) { 
-            if( n ) { 
-                ( statementTypes[n.type] || statementTypes.OtherStatements )( n, ctx );
-            }
-        } );
-    }
-}
-
-function defaultIDGenerator( scriptID, functionName, blockIndex ) {     
-    return scriptID + ":" + functionName + "[" + blockIndex + "]";
-}
-    
 module.exports = function coverage( scriptID, src, parseNode, options ) {
 
     options = options || {};
-    options.idGenerator = options.idGenerator || defaultIDGenerator;
-    
-    var editList = new EditList( src );
-    var tracker = new BlockTracker( scriptID, editList, options.idGenerator );
-    
-    walkTree( parseNode, tracker );
-    
-    /*
-    var blockSummary = tracker.getBlocks().map( function(b) { 
-        return b.id + " -> Ranges: " + JSON.stringify( b.ranges );
-    } ).join( "\n" );
-    */
-    // editList.insert( "/*\n" + blockSummary + "\n*/", src.length );
-    
-    return editList.apply();
+
+    var editList = new EditList( src),
+        functions = {};
+
+    var ctx = new BlockTracker( {
+        idGenerator: options.idGenerator || function( functionName, blockIndex ) {
+            return scriptID + functionName + "[" + blockIndex + "]";
+        },
+        visitFn: function( block, insertPos ) {
+            editList.insert( VISIT_TMPL( block ), insertPos, "after" );
+        }
+    } );
+
+    var walker = new Walker();
+
+    /* Some helper functions */
+    function endBlock() {
+        ctx.endBlock();
+    }
+
+    function forLoop( node, body ) {
+        ctx.addLine( this.getStartLine( node ), this.getStartPos( node ) );
+        ctx.startBlock( Block.TYPES.LOOP, this.getStartLine( body[0] ), this.getStartPos(  body[0] ) );
+    }
+
+    function breakContFn( node ) {
+        ctx.addLine( this.getStartLine( node ), this.getStartPos( node ) );
+        ctx.resetBlockType( Block.TYPES.LOOP );
+        return false;
+    }
+
+    function beforeIfAlternate( node, alternate ) {
+        if( alternate[0].type !== 'ElseifStatement' ) {
+            ctx.startBlock( Block.TYPES.OTHER, this.getStartLine( alternate[0] ), this.getStartPos( alternate[0] ) );
+        }
+    }
+
+    function afterIfAlternate( node, alternate ) {
+        if( alternate[0].type !== 'ElseifStatement' ) {
+            ctx.endBlock();
+        }
+    }
+
+    // make these callbacks do nothing but not cancel.
+    walker.on( [ "FunctionDeclaration",
+        "IfStatement", "ElseifStatement",
+        "ForStatement", "ForCStyleStatement", "ForInStatement" ], noop );
+
+    // these callbacks end blocks
+    walker.on( [
+        'after:ForStatement.body', 'after:ForCStyleStatement.body', 'after:ForInStatement.body',
+        'after:IfStatement.consequent', 'after:ElseifStatement.consequent',
+        'after:SwitchCase.consequent', 'after:RepeatStatement.body', 'after:WhileStatement:body'  ], endBlock );
+
+    // cancel traversal.
+    walker.on( [
+        'before:FunctionDeclaration.params',
+        'before:ElseifStatement.test',
+        'before:SwitchCase.test',
+        'before:RepeatStatement.test'], skipTraverse );
+
+    // handle loops
+    walker.on( [
+        'before:WhileStatement.body', 'before:RepeatStatement.body',
+        'before:ForStatement.body', 'before:ForInStatement.body', 'before:ForCStyleStatement' ], forLoop );
+
+    // handle break/continue.
+    walker.on( [
+        'BreakStatement', 'ContinueStatement', 'BreakIfStatement', 'ContinueIfStatement' ], breakContFn );
+
+    walker.on( {
+        'before:FunctionDeclaration.body': function( node, body ) {
+            ctx.setFunction( node.name );
+            editList.insert( "Assoc __cov = Assoc.CreateAssoc( 0 )\n", this.getStartPos( body[0] ), "after" );
+            functions[node.name] = ctx.startBlock( Block.TYPES.FUNCTION, this.getStartLine( node ), this.getStartPos( body[0] ) );
+        },
+
+        'after:FunctionDeclaration.body': function( node, body ) {
+            ctx.endBlock();
+            var lastStmt = body[body.length - 1];
+            if( lastStmt.type !== 'ReturnStatement' ) {
+                editList.insert( "\n$_C.v( __cov )", this.getEndPos( lastStmt )+1, "before" );
+            }
+        },
+
+        'before:IfStatement.test': function( node, test ) {
+            ctx.addLine( this.getStartLine( node ), this.getStartPos( node ) );
+            ctx.addLine( this.getStartLine( test[0] ), this.getStartPos( test[0] ) );
+        },
+
+        'before:IfStatement.consequent': function( node, consequent ) {
+            ctx.startBlock( Block.TYPES.OTHER, this.getStartLine( consequent[0] ), this.getStartPos( consequent[0] ) );
+        },
+
+        'before:ElseifStatement.consequent': function( node, consequent ) {
+            ctx.startBlock( Block.TYPES.OTHER, this.getStartLine( node ), this.getStartPos( consequent[0] ) );
+            ctx.addLine( this.getStartLine( node.test[0] ), this.getStartPos( node.test[0] ) );
+        },
+
+        'before:IfStatement.alternate': beforeIfAlternate,
+        'before:ElseifStatement.alternate': beforeIfAlternate,
+        'after:IfStatement.alternate': afterIfAlternate,
+        'after:ElseifStatement.alternate': afterIfAlternate,
+
+        'before:SwitchCase.consequent': function( node, consequent ) {
+            ctx.startBlock( Block.TYPES.OTHER, this.getStartLine( consequent[0] ), this.getStartPos( consequent[0] ) );
+        },
+
+        ReturnStatement: function( node ) {
+            ctx.addLine( this.getStartLine( node ), this.getStartPos( node ) );
+            ctx.resetBlockType( Block.TYPES.FUNCTION );
+            editList.insert( "$_C.v( __cov )\n", this.getStartPos( node), "after" );
+            return false;
+        },
+
+        // catch all (if not above).
+        '*': function(node,children,when) {
+            if( !when ) {
+                ctx.addLine( this.getStartLine( node ), this.getStartPos( node ) );
+            }
+        }
+    }).start( parseNode );
+
+    if( options.debug ) {
+        var blockSummary = ctx.getBlocks().map( function(b) {
+            return b.id + " -> Ranges: " + JSON.stringify( b.ranges );
+        } ).join( "\n" );
+
+        editList.insert( "/*\n" + blockSummary + "\n*/\n", src.length );
+    }
+
+    return {
+        result: editList.apply(),
+        blocks: ctx.getBlocks(),
+        functions: functions
+    };
 };
