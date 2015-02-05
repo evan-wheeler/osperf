@@ -175,7 +175,14 @@ function BlockTracker( options ) {
      * Returns the blocks that were defined.
      */
     this.getBlocks = function() { 
-        return blocks;
+        return blocks.map( function(v) {
+            return {
+                id: v.id,
+                ranges: v.ranges.map( function( r ) {
+                    return [ r.start, r.end ];
+                } )
+            }
+        });
     };
 }
 
@@ -229,7 +236,8 @@ module.exports = function coverage( src, parseNode, idGenerator ) {
     // make these callbacks do nothing but not cancel.
     walker.on( [ "FunctionDeclaration",
         "IfStatement", "ElseifStatement",
-        "ForStatement", "ForCStyleStatement", "ForInStatement"
+        "ForStatement", "ForCStyleStatement", "ForInStatement",
+        'SwitchCase'
     ], noop );
 
     // these callbacks end blocks
@@ -247,7 +255,7 @@ module.exports = function coverage( src, parseNode, idGenerator ) {
         'before:RepeatStatement.test',
         'before:ForStatement.first', 'before:ForStatement.second', 'before:ForStatement.third',
         'before:ForInStatement.first',
-        'before:ForCStyleStatement.first', 'before:ForCStyleStatement.second', 'before:ForCStyleStatement.third',
+        'before:ForCStyleStatement.first', 'before:ForCStyleStatement.second', 'before:ForCStyleStatement.third'
     ], skipTraverse );
 
     // handle loops

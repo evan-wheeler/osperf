@@ -2,7 +2,7 @@ var glob = require( 'glob'),
     path = require( 'path'),
     fs = require( 'fs' );
 
-function Module( baseDir, modName ) {
+function Module( modName, baseDir ) {
     this.baseDir = baseDir;
     this.module = modName;
 
