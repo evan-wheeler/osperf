@@ -59,6 +59,7 @@ function instrument( code, parseTree, idGenerator ) {
                 pos: this.getStartPos( body[0] ),
                 indent: "after"
             } );
+            return true;
         },
         'after:FunctionDeclaration.body': function( func, body ) {
             var lastStmt = body[body.length - 1];

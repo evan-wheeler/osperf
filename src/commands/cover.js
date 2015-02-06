@@ -22,22 +22,56 @@ function cover( modules, options ) {
     var gen = new IDGenerator(),
         modObjs = modules.map( function(modName) { return new Module( modName, options.base ); } )
 
+    var params = {
+        idGenerator: gen,
+        sourceStore: {}
+    };
+
     return parseUtils.listScriptsInModules( modObjs )
         .then( function( allFiles ) {
-            return processFiles( allFiles, gen );
+            return processFiles( allFiles, params );
         })
         .then( function( results ) {
-
-            var output = genCoverageData( results.blocks, results.functions, gen.getIDs() );
-
+            var output = genCoverageData( results.blocks, results.functions, gen.getIDs(), params.sourceStore );
             fs.writeFileSync( options.output, JSON.stringify( output ), 'utf8' );
+
+            // add headers
+            modObjs.forEach( function( m ) {
+                addHeader( m.getStartupScripts() );
+            } );
         })
         .catch( function( e ) {
             console.error( "There was a problem: ", e );
         } );
 }
 
-function genCoverageData( blocks, function_blocks, id_locations ) {
+function addHeader(startupFiles) {
+    var code =
+        "/* Begin coverage setup */\r\n" +
+            "if IsUndefined( $_C )\r\n" +
+            "   Script __v = Compiler.Compile( 'Function V(Assoc visited,Integer adj=undefined);if isDefined(adj);.depth+=adj;end;String k;for k in Assoc.keys(visited);.fBlocks.(k)+=visited.(k);end;if .depth<=0||Length(.fBlocks)>500;File.Write(.fOutput,Str.ValueToString(.fBlocks));.fBlocks=Assoc.CreateAssoc(0);if .depth<0;depth=0;end;end;End')\r\n" +
+            "   String __lp = $Kernel.SystemPreferences.GetPrefGeneral( 'Logpath' )\r\n" +
+            "   String __logf=Str.Format( '%1coverage_%2.out',( __lp[1] == '.' && __lp[2] in {'/', '\\'}?$Kernel.ModuleUtils._OTHome()+__lp[3:]:__lp),System.ThreadIndex())\r\n" +
+            "   File __tf = File.Open( __logf, File.WriteMode )\r\n" +
+            "   if IsError( __tf )\r\n" +
+            "       Echo( 'Coverage could not open ', __logf, ' for writing: ', __tf )\r\n" +
+            "   end\r\n" +
+            "   Assoc blocks = Assoc.CreateAssoc(0)\r\n" +
+        "   $_C = Frame.New( {}, { { 'depth', 0 }, { 'fOutput', __tf }, { 'V', __v }, { 'fBlocks', blocks } } )\r\n" +
+        "end\r\n " +
+        "/* End coverage setup */\r\n";
+
+    startupFiles.forEach( function( f ) {
+        var content = fs.readFileSync( f, "utf8" ),
+            startStr = "/* Begin coverage setup */";
+
+        if( content.indexOf( startStr ) === -1 ) {
+            fs.writeFileSync( f, code + content, "utf8" );
+        }
+    } );
+}
+
+function genCoverageData( blocks, function_blocks, id_locations, originalSource ) {
     'use strict';
 
     /**
@@ -75,7 +109,8 @@ function genCoverageData( blocks, function_blocks, id_locations ) {
 
     return {
         blocks: blockMap,
-        locations: byLocID
+        locations: byLocID,
+        source: originalSource
     };
 }
 
@@ -85,9 +120,9 @@ function genCoverageData( blocks, function_blocks, id_locations ) {
  * @param idGenerator
  * @returns {!Promise.<RESULT>|*}
  */
-function processFiles( srcFiles, idGenerator ) {
+function processFiles( srcFiles, params ) {
     'use strict';
-    return Q.nfcall( async.mapLimit, srcFiles, 4, processEach.bind( null, idGenerator ) ).then( combine );
+    return Q.nfcall( async.mapLimit, srcFiles, 4, processEach.bind( null, params ) ).then( combine );
 }
 
 /**
@@ -95,14 +130,17 @@ function processFiles( srcFiles, idGenerator ) {
  * @param file
  * @param done
  */
-function processEach( idGenerator, file, done ) {
+function processEach( params, file, done ) {
 
     console.log( "Parsing file: ", file );
     parseUtils.parseFile(file).then( function( parseResult ) {
 
+        // save the original source code.
+        params.sourceStore[file] = parseResult.src;
+
         // adapt our block ID generator for this file.
         var blockIDGen = function ( blockInfo ) {
-            return idGenerator.newID( {
+            return params.idGenerator.newID( {
                 script: file,
                 func: blockInfo.func
             } );

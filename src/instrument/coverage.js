@@ -67,6 +67,7 @@ function BlockTracker( options ) {
 
     var idGenerator = options.idGenerator || defaultIDGenerator,
         visitFn = options.visitFn,
+        headerFn = options.headerFn,
         scope = options.scope || this;
     
     /** 
@@ -80,25 +81,42 @@ function BlockTracker( options ) {
         
         curFunction = name;
     };
+
+    /**
+     * Gets the current function
+     * @returns {*} the current function name or null
+     */
+    this.getFunction = function() {
+        return curFunction;
+    };
+
+    /**
+     * Determines if the script being processed has code outside of the first function body.
+     * @returns {boolean} true if this script has raw code, false otherwise.
+     */
+    this.hasRawCode = function() {
+        return rawScript;
+    };
     
     /**
      * Adds a line into the appropriate block, which is normally the block that 
      * is on the top of the stack.
      * 
-     * @param {number} line - The line that should be included.
-     * @param {number} insertPos - The character index where instrumentation should be inserted if needed.
+     * @param {Integer} line - The line that should be included.
+     * @param {Integer} insertPos - The character index where instrumentation should be inserted if needed.
      */
-    this.addLine = function( line, insertPos ) { 
+    this.addLine = function( line, insertPos ) {
+
         if( blockStack.length === 0 ) {
             if( rawScript ) { 
                 throw Error( "Extraneous input after last function is invalid." );
             }
-            
+
             // We're outside of all functions.
-            this.startBlock( Block.TYPES.FUNCTION, line, insertPos );
+            this.startBlock( Block.TYPES.FUNCTION, line, insertPos, true );
             rawScript = true;
         }
-        
+
         var top = blockStack[blockStack.length - 1];
         
         if( top.reset ) { 
@@ -112,18 +130,14 @@ function BlockTracker( options ) {
 
     /**
      * Starts a new block
-     * @param {number} type - The block type.
-     * @param {number} line - The line where the block begins.
-     * @param {number} insertPos - The character index where instrumentation should be inserted.
+     * @param {Integer} type - The block type.
+     * @param {Integer} line - The line where the block begins.
+     * @param {Integer} insertPos - The character index where instrumentation should be inserted.
+     * @param {boolean} [addHeader] - True to add the entry code header.
      */
-    this.startBlock = function( type, line, insertPos ) {
-        if( arguments.length === 1 ) { 
-            type = type.type;
-            insertPos = type.insertPos;
-            line = type.line;
-        }
-        
-        if( line > -1 && insertPos > -1 ) { 
+    this.startBlock = function( type, line, insertPos, addHeader ) {
+        if( line > -1 && insertPos > -1 ) {
+
             var blockID = idGenerator.call( scope, {
                     func: curFunction,
                     block: blockIndex++
@@ -138,8 +152,11 @@ function BlockTracker( options ) {
             blocks.push( block );
 
             // add the visit mark here.
+            if( addHeader ) {
+                headerFn( null, insertPos );
+            }
+
             visitFn.call( options.scope, block, insertPos );
-            // editList.insert( "$_C.v('" + blockID + "')\n", insertPos, "after" );
 
             return block;
         }
@@ -155,7 +172,7 @@ function BlockTracker( options ) {
     
     /** 
      * Traverses the stack, resetting blocks until a block of type blockType is found.
-     * @param {integer} blockType - The type of block to find.
+     * @param {Integer} blockType - The type of block to find.
      */
     this.resetBlockType = function( blockType ) { 
         var i = blockStack.length;
@@ -194,44 +211,50 @@ var VISIT_TMPL = _.template( "__cov.('<%= id %>')+=1\n");
 module.exports = function coverage( src, parseNode, idGenerator ) {
 
     var editList = new EditList( src),
-        functions = [];
+        functions = [],
+        record_visits = "$_C.v( __cov, -1 )\n";
 
     var ctx = new BlockTracker( {
         idGenerator: idGenerator,
         visitFn: function( block, insertPos ) {
             editList.insert( VISIT_TMPL( block ), insertPos, "after" );
+        },
+        headerFn: function( block, insertPos ) {
+            editList.insert( "Assoc __cov = Assoc.CreateAssoc( 0 )\n", insertPos, "after" );
+            editList.insert( "$_C.depth += 1\n", insertPos, "after" );
         }
     } );
 
     var walker = new Walker();
+    var rawScriptFix = false;
 
     /* Some helper functions */
     function endBlock() {
         ctx.endBlock();
     }
 
-    function forLoop( node, body ) {
+    var forLoop = function( node, body ) {
         ctx.addLine( this.getStartLine( node ), this.getStartPos( node ) );
         ctx.startBlock( Block.TYPES.LOOP, this.getStartLine( body[0] ), this.getStartPos( body[0] ) );
-    }
+    };
 
-    function breakContFn( node ) {
+    var breakContFn = function( node ) {
         ctx.addLine( this.getStartLine( node ), this.getStartPos( node ) );
         ctx.resetBlockType( Block.TYPES.LOOP );
         return false;
-    }
+    };
 
-    function beforeIfAlternate( node, alternate ) {
+    var beforeIfAlternate = function (node, alternate ) {
         if( alternate[0].type !== 'ElseifStatement' ) {
             ctx.startBlock( Block.TYPES.OTHER, this.getStartLine( alternate[0] ), this.getStartPos( alternate[0] ) );
         }
-    }
+    };
 
-    function afterIfAlternate( node, alternate ) {
+    var afterIfAlternate = function( node, alternate ) {
         if( alternate[0].type !== 'ElseifStatement' ) {
             ctx.endBlock();
         }
-    }
+    };
 
     // make these callbacks do nothing but not cancel.
     walker.on( [ "FunctionDeclaration",
@@ -271,9 +294,15 @@ module.exports = function coverage( src, parseNode, idGenerator ) {
 
     walker.on( {
         'before:FunctionDeclaration.body': function( node, body ) {
+            if( ctx.hasRawCode() ) {
+                if( ctx.getFunction() === null ) {
+                    editList.insert( record_visits, this.getStartPos( node ), "after" );
+                    rawScriptFix = true;
+                }
+            }
+
             ctx.setFunction( node.name );
-            editList.insert( "Assoc __cov = Assoc.CreateAssoc( 0 )\n", this.getStartPos( body[0] ), "after" );
-            var funcBlock = ctx.startBlock( Block.TYPES.FUNCTION, this.getStartLine( node ), this.getStartPos( body[0] ) );
+            var funcBlock = ctx.startBlock( Block.TYPES.FUNCTION, this.getStartLine( node ), this.getStartPos( body[0] ), true );
             functions.push( funcBlock.id );
         },
 
@@ -281,7 +310,7 @@ module.exports = function coverage( src, parseNode, idGenerator ) {
             ctx.endBlock();
             var lastStmt = body[body.length - 1];
             if( lastStmt.type !== 'ReturnStatement' ) {
-                editList.insert( "\n$_C.v( __cov )", this.getEndPos( lastStmt )+1, "before" );
+                editList.insert( "\n" + record_visits, this.getEndPos( lastStmt )+1, "before" );
             }
         },
 
@@ -308,10 +337,10 @@ module.exports = function coverage( src, parseNode, idGenerator ) {
             ctx.startBlock( Block.TYPES.OTHER, this.getStartLine( consequent[0] ), this.getStartPos( consequent[0] ) );
         },
 
-        ReturnStatement: function( node ) {
+        'ReturnStatement': function( node ) {
             ctx.addLine( this.getStartLine( node ), this.getStartPos( node ) );
             ctx.resetBlockType( Block.TYPES.FUNCTION );
-            editList.insert( "$_C.v( __cov )\n", this.getStartPos( node), "after" );
+            editList.insert( record_visits, this.getStartPos( node), "after" );
             return false;
         },
 
@@ -322,6 +351,10 @@ module.exports = function coverage( src, parseNode, idGenerator ) {
             }
         }
     }).start( parseNode );
+
+    if( ctx.hasRawCode() && !rawScriptFix ) {
+        editList.insert( record_visits, src.length, "after" );
+    }
 
     var debug = false;
     if( debug ) {

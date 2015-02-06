@@ -45,7 +45,13 @@ Edits.prototype.apply = function applyEdits() {
         code = "" + this.origValue;
 
     edits.sort( function( a, b ) {
-        return a.pos - b.pos;
+        var diff = ( a.pos - b.pos );
+
+        if( diff === 0 )  {
+            diff = a.origOrder - b.origOrder;
+        }
+
+        return diff;
     } );
 
     var buffers = [], i = -1, len = edits.length, lastPos = 0;
@@ -70,7 +76,7 @@ Edits.prototype.apply = function applyEdits() {
 };
 
 Edits.prototype.replace = function( firstIndex, afterIndex, replaceWith ) {
-    this.edits.push( { type: 'replace', pos: firstIndex, afterPos: afterIndex, content: replaceWith } );
+    this.edits.push( { type: 'replace', pos: firstIndex, afterPos: afterIndex, content: replaceWith, origOrder: this.edits.length } );
 };
 
 Edits.prototype.insert = function( str, beforeIndex, indent ) {
@@ -105,7 +111,7 @@ Edits.prototype.insert = function( str, beforeIndex, indent ) {
             }
         }
 
-        this.edits.push( { type: 'insert', pos: beforeIndex, content: str } );
+        this.edits.push( { type: 'insert', pos: beforeIndex, content: str, origOrder: this.edits.length } );
     }
     else {
         throw Error( "Unexpected parameters: " + arguments.toString() );

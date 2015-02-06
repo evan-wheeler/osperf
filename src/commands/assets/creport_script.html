@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title><%= pageTitle %></title>
+    <style>
+        #editor {
+            height:400px;
+            box-sizing:border-box;
+            border:1px solid #a0a0a0;
+            margin:2px;
+        }
+
+        ul.crumbs {
+            margin:0px;
+            padding:0px;
+            list-style-type: none;
+        }
+
+        ul.crumbs li {
+            display:inline;
+        }
+    </style>
+</head>
+<body>
+    <h1>Report for <%= scriptName %></h1>
+    <ul class="crumbs">
+    <% _.forEach( scriptPath, function(v) { %>
+        <li><span>/</span><a href="<%= v.url %>"><%- v.name %></a></li>
+    <% } ); %>
+    </ul>
+    <div id="editor"><%- code %></div>
+    <script src="<%= relDir %>scripts/ace.js" type="text/javascript" charset="utf-8"></script>
+    <script>
+        var editor = ace.edit("editor");
+        editor.setTheme("ace/theme/chrome");
+        editor.getSession().setMode("ace/mode/oscript");
+    </script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title><%= filename %></title>
+    <style>
+        #editor {
+            height:400px;
+            box-sizing:border-box;
+            border:1px solid #a0a0a0;
+            margin:2px;
+        }
+
+        ul.crumbs {
+            margin:0px;
+            padding:0px;
+            list-style-type: none;
+        }
+
+        ul.crumbs li {
+            display:inline;
+        }
+    </style>
+</head>
+<body>
+<h1>Report for <%= filename %></h1>
+<ul class="crumbs">
+    <% for( var i = 0; i < scriptPath.length; ++i ) { %>
+    <li>
+        <a href="<%= v.url %>"><%- v.name %></a>
+        <% if( i + 1 >= scriptPath.length ) print( "/" ); %>
+    </li>
+    <% } %>
+</ul>
+<!-- spit out all the child objects here -->
+
+</body>
+</html>

@@ -2,10 +2,10 @@
   "name": "oscript_profiler",
   "version": "0.0.0",
   "main": "index.js",
-    "scripts": {
-        "test": "mocha --reporter spec --bail --check-leaks test/",
-        "test-cov": "istanbul cover node_modules/mocha/bin/_mocha -- --reporter dot --check-leaks test/"
-    },
+  "scripts": {
+    "test": "mocha --reporter spec --bail --check-leaks test/",
+    "test-cov": "istanbul cover node_modules/mocha/bin/_mocha -- --reporter dot --check-leaks test/"
+  },
   "author": "",
   "license": "ISC",
   "dependencies": {
@@ -16,7 +16,10 @@
     "deep-equal": "~0.2.1",
     "clone": "~0.2.0",
     "bannockburn": "0.0.1",
-    "q": "~1.1.2"
+    "q": "~1.1.2",
+    "event-stream": "~3.2.2",
+    "rimraf": "~2.2.8",
+    "ncp": "~1.0.1"
   },
   "devDependencies": {
     "grunt": "~0.4.5",
