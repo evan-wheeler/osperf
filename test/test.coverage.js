@@ -1,6 +1,6 @@
 var should = require( 'should'),
     assert = require( 'assert'),
-    Bannockburn = require( '../../bannockburn'),
+    Bannockburn = require( 'bannockburn'),
     coverage = require( '../src/instrument/coverage.js' );
 
 var p = Bannockburn.Parser();

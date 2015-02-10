@@ -12,7 +12,7 @@ function Module( modName, baseDir ) {
         src_path = path.join( baseDir, modName, 'ospaces_src', path.sep );
 
         if( !fs.existsSync( src_path ) ) {
-            throw Error( "Module source directory could not be found." );
+            throw Error( "Module source directory could not be found for base directory: " + baseDir + ", module name: " + modName );
         }
     }
 

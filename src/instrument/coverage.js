@@ -1,5 +1,5 @@
 var EditList = require( './edits' ),
-    Walker = require( '../../../Bannockburn').Walker,
+    Walker = require( 'bannockburn').Walker,
     _ = require( 'lodash' );
 
 /** 

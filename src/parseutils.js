@@ -1,7 +1,7 @@
 var Q = require( 'q'),
     fs = require( 'fs'),
     async = require( 'async'),
-    Bannockburn = require( '../../bannockburn' );
+    Bannockburn = require( 'bannockburn' );
 
 var cat = function( a, i ) {
     return a.concat( i );
