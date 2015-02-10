@@ -98,12 +98,10 @@ function writeReports( reportDir, shellInfo, reportData, dirStats, coverInfo ) {
     });
 }
 
-function setOnAllLines( ranges, format ) {
+function setOnAllLines( linesArray, format ) {
     var lines = {};
-    ranges.forEach( function( r ) {
-        for( var i = r[0]; i <= r[1]; ++i ) {
-            lines[i-1] = format;
-        }
+    linesArray.forEach( function( lineIndex ) {
+        lines[lineIndex-1] = format;
     } );
     return lines;
 }
@@ -111,16 +109,15 @@ function setOnAllLines( ranges, format ) {
 function calcLineFormatting( blocks ) {
     var lines = {};
 
-    var ranges = [];
     _.each( blocks, function( block ) {
         if( block.hits === 0 ) {
-            _.assign( lines, setOnAllLines( block.ranges, {
+            _.assign( lines, setOnAllLines( block.lines, {
                 lineClass: 'line-not-hit',
                 gutterClass: 'line-not-hit'
             } ) );
         }
         else if( block.hits > 0 ) {
-            _.assign( lines, setOnAllLines( block.ranges, {
+            _.assign( lines, setOnAllLines( block.lines, {
                 gutterClass: 'line-hit',
                 lineClass: 'line-hit',
                 gutterContent: "" + block.hits
@@ -538,19 +535,6 @@ function scriptPathToObjInfo( p ) {
     return objInfo;
 }
 
-function getLinesInRanges( ranges ) {
-    var lines = {}, count = 0;
-    ranges.forEach( function(v){
-        for( var i = v[0]; i <= v[1]; ++i ) {
-            if( !lines[i] ) {
-                count++;
-                lines[i] = 1;
-            }
-        }
-    } );
-    return count;
-}
-
 function collectScriptData( visits, coverInfo ) {
 
     // first process all the scripts -- these are the end points.
@@ -606,14 +590,14 @@ function collectScriptData( visits, coverInfo ) {
             }
 
             var blockVisits = visits[bID],
-                ranges = coverInfo.blocks[bID].ranges,
-                linesInRanges = getLinesInRanges( ranges );
+                blockLines = coverInfo.blocks[bID].lines,
+                lineCount = blockLines.length;
 
-            entry.stats.lines += linesInRanges;
+            entry.stats.lines += lineCount;
 
             // update block/line summary stats for the script
             entry.stats.blocksHit += blockVisits > 0 ? 1 : 0;
-            entry.stats.linesHit += blockVisits > 0 ? linesInRanges : 0;
+            entry.stats.linesHit += blockVisits > 0 ? lineCount : 0;
 
             if( blockInfo.f && blockVisits ) {
                 // stats.functionHits is number of functions
@@ -622,10 +606,10 @@ function collectScriptData( visits, coverInfo ) {
             }
 
             // update the instance hits by block,
-            // also keep ranges for each block here.
+            // also keep lines for each block here.
             entry.blockCodes[bID] = {
                 hits: blockVisits || 0,
-                ranges: ranges
+                lines: blockLines
             };
 
             entry.stats.totalHits += ( blockVisits || 0 ) ;

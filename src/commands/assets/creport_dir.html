@@ -16,7 +16,7 @@
     <h1><% _.forEach( crumbtrail, function(crumb,i) { -%>
             <% if( i > 0 ) { %> <b> / </b><% } -%>
             <% if( crumb.url ) { -%>
-            <a href="<%- crumb.url %>"><%- crumb.name %></a>
+            <a class='dir' href="<%- crumb.url %>"><%- crumb.name %></a>
         <% } else { %>
         <span class="self"><%- crumb.name %></span>
         <% } } ); -%>
@@ -84,37 +84,83 @@
 </div>
 </div>
 <script>
-    var browser = $( '#browser' ).DataTable( {
-        paging: false,
-        "columnDefs": [
-            {
-                // The `data` parameter refers to the data for the cell (defined by the
-                // `data` option, which defaults to the column being worked with, in
-                // this case `data: 0`.
-                "render": function ( data, type, row ) {
-                    return '<div title="' + data + '" class="type-img ' + data + '"></div>';
-                },
-                "type": "object-type",
-                "targets": 0
-            }
-        ]
-    } );
 
-    $.fn.dataTable.ext.type.detect.unshift(
-            function ( d ) {
-                return [ "module", "ospace", "script", "object", "orphan" ].indexOf( d ) !== -1 ? "object-type" : null;
+    $( function() {
+        var browser = $( '#browser' ).DataTable( {
+            paging: false,
+            "columnDefs": [
+                {
+                    // The `data` parameter refers to the data for the cell (defined by the
+                    // `data` option, which defaults to the column being worked with, in
+                    // this case `data: 0`.
+                    "render": function ( data, type, row ) {
+                        return '<div title="' + data + '" class="type-img ' + data + '"></div>';
+                    },
+                    "type": "object-type",
+                    "targets": 0
+                }
+            ]
+        } );
+
+        $.fn.dataTable.ext.type.detect.unshift(
+                function ( d ) {
+                    return [ "module", "ospace", "script", "object", "orphan" ].indexOf( d ) !== -1 ? "object-type" : null;
+                }
+        );
+        $.fn.dataTable.ext.type.order[ 'object-type-pre'] = function ( d ) {
+            switch ( d ) {
+                case 'module':   return 1;
+                case 'ospace':   return 2;
+                case 'object':   return 3;
+                case 'orphan':   return 4;
+                case 'script':   return 5;
             }
-    );
-    $.fn.dataTable.ext.type.order[ 'object-type-pre'] = function ( d ) {
-        switch ( d ) {
-            case 'module':   return 1;
-            case 'ospace':   return 2;
-            case 'object':   return 3;
-            case 'orphan':   return 4;
-            case 'script':   return 5;
+            return 0;
+        };
+
+        var sortSearch = /#((?:[0-9]+)-(?:asc|desc)(?:\+(?:[0-9]+)-(?:asc|desc))*)/g.exec( window.location.hash );
+
+        if( sortSearch ) {
+            var sorts = sortSearch[1].split( "+").map( function(v) { return v.split( "-" ); } );
+            var table = $( '#browser').dataTable();
+            table.fnSort(sorts);
         }
-        return 0;
-    };
+
+        function getSortStr(sorts) {
+            var sortOrder = [];
+            var numSorts = sorts.length;
+
+            for( var i = 0; i < numSorts; ++i ) {
+                var v = sorts[i];
+                if(v && v.length == 2 ) {
+                    sortOrder.push( v[0] + "-" + v[1] );
+                }
+            }
+            return "#" + sortOrder.join( "+" );
+        }
+
+        browser.on( "order", function( event, tbl, order, dir ) {
+
+            var sorts = [];
+
+            for( var v in order ) {
+                if( order.hasOwnProperty( v ) ) {
+                    sorts.push( [ order[v].col, order[v].dir ] );
+                }
+            }
+
+            var newSortStr = getSortStr( sorts );
+            history.replaceState(undefined, undefined, newSortStr );
+        } );
+
+        $( '#browser, #header' ).on( 'click', 'a', function( e ) {
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            window.location = $( e.target).attr( "href" ) + window.location.hash;
+        } );
+    } );
 </script>
 </body>
 </html>

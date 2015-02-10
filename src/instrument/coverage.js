@@ -4,51 +4,26 @@ var EditList = require( './edits' ),
 
 /** 
  * Block class
- * Each block represents one or more lines of code (a range) that will 
+ * Each block represents one or more lines of code that will
  * have to execute if the beginning of the block is reached.
  */
-function Block( blockType, id, startLine ) { 
-    this.ranges = [ { start: startLine, end: startLine } ];
-    this.lines = {};
-    this.lines[startLine] = true;
+function Block( blockType, id, startLine ) {
+    this.lines = [ startLine ];
     this.id = id;
     this.type = blockType;
     this.reset = false;
 }
 
 /**
- * Increases the end marker for the current range.
- * If this block was previously interrupted by another block,
- * this will start a new range.
- * @param line  The line of code to add to the current range.
+ * Adds a covered line to the block.
+ * @param line  The line of code to add to the current block.
  */
-Block.prototype.addLine = function( line ) { 
-    /*if( this.interrupted ) {
-        if( line > this.ranges[ this.ranges.length - 1 ].end + 1 ) { 
-            this.ranges.push( { start: line, end: line } );
-        }    
-        this.interrupted = false;
-    }
-
-    var last = this.ranges[ this.ranges.length - 1 ];
-    last.end = Math.max( last.end, line );
-    */
-
-    if( line !== null ) {
-        if( !this.lines.hasOwnProperty( line ) ) {
-            this.lines[line]=true;
-
-            // Switch to one line per range ...
-            this.ranges.push( { start: line, end: line } );
+Block.prototype.addLine = function( line ) {
+    if(_.isNumber( line ) && line >= 0 ) {
+        if( _.indexOf( this.lines, line ) === -1 ) {
+            this.lines.push( line );
         }
     }
-};
-
-/**
- * Interrupts the current range. 
- */
-Block.prototype.interrupt = function() {
-    this.interrupted = true;
 };
 
 Block.TYPES = {
@@ -155,10 +130,12 @@ function BlockTracker( options ) {
                 } ),
                 block = new Block( type, blockID, line );
             
-            if( blockStack.length > 0 ) { 
+            /*
+            if( blockStack.length > 0 ) {
                 blockStack[blockStack.length - 1].interrupt();
             }
-            
+            */
+
             blockStack.push( block );
             blocks.push( block );
 
@@ -206,10 +183,8 @@ function BlockTracker( options ) {
         return blocks.map( function(v) {
             return {
                 id: v.id,
-                ranges: v.ranges.map( function( r ) {
-                    return [ r.start, r.end ];
-                } )
-            }
+                lines: v.lines
+            };
         });
     };
 }
@@ -223,7 +198,7 @@ module.exports = function coverage( src, parseNode, idGenerator ) {
 
     var editList = new EditList( src),
         functions = [],
-        record_visits = "$_C.v( __cov, -1 )\n";
+        record_visits = "$_C.v( __cov, -1 )";
 
     var ctx = new BlockTracker( {
         idGenerator: idGenerator,
@@ -307,7 +282,7 @@ module.exports = function coverage( src, parseNode, idGenerator ) {
         'before:FunctionDeclaration.body': function( node, body ) {
             if( ctx.hasRawCode() ) {
                 if( ctx.getFunction() === null ) {
-                    editList.insert( record_visits, this.getStartPos( node ), "after" );
+                    editList.insert( record_visits + "\n", this.getStartPos( node ), "after" );
                     rawScriptFix = true;
                 }
             }
@@ -351,7 +326,7 @@ module.exports = function coverage( src, parseNode, idGenerator ) {
         'ReturnStatement': function( node ) {
             ctx.addLine( this.getStartLine( node ), this.getStartPos( node ) );
             ctx.resetBlockType( Block.TYPES.FUNCTION );
-            editList.insert( record_visits, this.getStartPos( node), "after" );
+            editList.insert( record_visits + "\n", this.getStartPos( node), "after" );
             return false;
         },
 
@@ -364,16 +339,7 @@ module.exports = function coverage( src, parseNode, idGenerator ) {
     }).start( parseNode );
 
     if( ctx.hasRawCode() && !rawScriptFix ) {
-        editList.insert( record_visits, src.length, "after" );
-    }
-
-    var debug = false;
-    if( debug ) {
-        var blockSummary = ctx.getBlocks().map( function(b) {
-            return b.id + " -> Ranges: " + JSON.stringify( b.ranges );
-        } ).join( "\n" );
-
-        editList.insert( "/*\n" + blockSummary + "\n*/\n", src.length );
+        editList.insert( "\n" + record_visits, src.length, "before" );
     }
 
     // convert block data to

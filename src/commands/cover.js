@@ -19,7 +19,7 @@ function cover( modules, options ) {
         modules = [ modules ];
     }
 
-    var gen = new IDGenerator(),
+    var gen = new IDGenerator( { chars: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ;:=?@!~#$%&-_" } ),
         modObjs = modules.map( function(modName) { return new Module( modName, options.base ); } )
 
     var params = {
@@ -99,7 +99,7 @@ function genCoverageData( blocks, function_blocks, id_locations, originalSource 
             byLocID[uLoc] = [ blockLoc.script, blockLoc.func, [] ];
         }
 
-        blockMap[b.id] = { ranges: b.ranges, loc: uLoc };
+        blockMap[b.id] = { lines: b.lines, loc: uLoc };
         byLocID[uLoc][2].push(b.id);
     } );
 
