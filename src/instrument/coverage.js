@@ -9,7 +9,8 @@ var EditList = require( './edits' ),
  */
 function Block( blockType, id, startLine ) { 
     this.ranges = [ { start: startLine, end: startLine } ];
-    
+    this.lines = {};
+    this.lines[startLine] = true;
     this.id = id;
     this.type = blockType;
     this.reset = false;
@@ -22,7 +23,7 @@ function Block( blockType, id, startLine ) {
  * @param line  The line of code to add to the current range.
  */
 Block.prototype.addLine = function( line ) { 
-    if( this.interrupted ) { 
+    /*if( this.interrupted ) {
         if( line > this.ranges[ this.ranges.length - 1 ].end + 1 ) { 
             this.ranges.push( { start: line, end: line } );
         }    
@@ -31,6 +32,16 @@ Block.prototype.addLine = function( line ) {
 
     var last = this.ranges[ this.ranges.length - 1 ];
     last.end = Math.max( last.end, line );
+    */
+
+    if( line !== null ) {
+        if( !this.lines.hasOwnProperty( line ) ) {
+            this.lines[line]=true;
+
+            // Switch to one line per range ...
+            this.ranges.push( { start: line, end: line } );
+        }
+    }
 };
 
 /**

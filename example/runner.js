@@ -1,6 +1,7 @@
 var Bannockburn = require( '../../bannockburn'),
-    profiler = require( '../src/profile' ),
-    coverage = require( '../src/coverage' ),
+    profiler = require( '../src/instrument/profile' ),
+    coverage = require( '../src/instrument/coverage' ),
+    IDGen = require( '../src/idgen'),
     _ = require( 'lodash' );
 
 var Lexer = Bannockburn.Lexer,
@@ -132,12 +133,21 @@ function go(source) {
 
 function doInstrument(editor) {
     var parser = Parser(),
-        source = editor.getValue();
+        source = editor.getValue(),
+        gen = new IDGen(),
+        scriptID = "path.";
+
+    function funcIDGen( name ) {
+        return gen.newID( scriptID + name );
+    }
     
     try {
         var tree = parser.parse( source );
-        var result = profiler( "path.", parser.getSource(), tree );
+        var result = profiler( parser.getSource(), tree, funcIDGen );
         editor.setValue( result );
+
+        console.log( "ID decodes: ", gen.getIDs() );
+
     } catch (e) {
         window.alert( e.message );
     }
@@ -145,11 +155,17 @@ function doInstrument(editor) {
 
 function doCodeCoverage(editor) {
     var parser = Parser(),
+        gen = new IDGen(),
+        scriptID = "path.",
         source = editor.getValue();
-    
+
+    function blockIDGen( info ) {
+        return gen.newID( scriptID + info.func + "[" + info.block + "]" );
+    }
+
     try {
         var tree = parser.parse( source );
-        var result = coverage( "path.", parser.getSource(), tree, { debug: true } );
+        var result = coverage( parser.getSource(), tree, blockIDGen );
         editor.setValue( result.result );
 
         console.log( "Functions: ", result.functions );

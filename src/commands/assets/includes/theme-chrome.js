@@ -3,16 +3,14 @@ ace.define("ace/theme/chrome",["require","exports","module","ace/lib/dom"], func
 exports.isDark = false;
 exports.cssClass = "ace-chrome";
 exports.cssText = ".ace-chrome .ace_gutter {\
-background: #ebebeb;\
+background: #f0f0f0;\
 color: #333;\
 overflow : hidden;\
 }\
 .ace-chrome .ace_print-margin {\
 width: 1px;\
-background: #e8e8e8;\
 }\
 .ace-chrome {\
-background-color: #FFFFFF;\
 color: black;\
 }\
 .ace-chrome .ace_cursor {\

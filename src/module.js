@@ -17,12 +17,12 @@ function Module( modName, baseDir ) {
     }
 
     this.source_path = src_path;
-    this.multiOspaceModule = src_path.indexOf( "ospaces_src") !== -1
+    this.multiOspaceModule = src_path.indexOf( "ospaces_src") !== -1;
 }
 
 Module.prototype.getScripts = function()  {
     return glob.sync( this.source_path + "**/*.Script" );
-}
+};
 
 Module.prototype.getStartupScripts = function() {
     var globSearch = this.source_path + ( this.multiOspaceModule ? "*/*Root/Startup.Script" : "*Root/Startup.Script" );
@@ -31,6 +31,6 @@ Module.prototype.getStartupScripts = function() {
         // filter a little more precisely...
         return /.*[\\/][ a-zA-Z0-9_]+[ ]?Root[\\/]Startup\.Script$/.test( file );
     } );
-}
+};
 
 module.exports = Module;

@@ -1,37 +1,120 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title><%= filename %></title>
-    <style>
-        #editor {
-            height:400px;
-            box-sizing:border-box;
-            border:1px solid #a0a0a0;
-            margin:2px;
-        }
-
-        ul.crumbs {
-            margin:0px;
-            padding:0px;
-            list-style-type: none;
-        }
-
-        ul.crumbs li {
-            display:inline;
-        }
-    </style>
+    <title><%- pageTitle %></title>
+    <meta charset="utf-8">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
+    <script src="https://code.jquery.com/jquery-1.11.2.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/datatables/1.10.4/js/jquery.dataTables.min.js"></script>
+    <link rel="stylesheet" type="text/css" href="<%= reportRoot %>/report.css">
+    <link href='http://fonts.googleapis.com/css?family=Open+Sans:400,700|Oswald:400,700' rel='stylesheet' type='text/css'>
 </head>
 <body>
-<h1>Report for <%= filename %></h1>
-<ul class="crumbs">
-    <% for( var i = 0; i < scriptPath.length; ++i ) { %>
-    <li>
-        <a href="<%= v.url %>"><%- v.name %></a>
-        <% if( i + 1 >= scriptPath.length ) print( "/" ); %>
-    </li>
-    <% } %>
-</ul>
-<!-- spit out all the child objects here -->
+<div class="container">
+<div id='header' class="<%- headerClass %>">
+    <h3>Code Coverage</h3>
+    <h1><% _.forEach( crumbtrail, function(crumb,i) { -%>
+            <% if( i > 0 ) { %> <b> / </b><% } -%>
+            <% if( crumb.url ) { -%>
+            <a href="<%- crumb.url %>"><%- crumb.name %></a>
+        <% } else { %>
+        <span class="self"><%- crumb.name %></span>
+        <% } } ); -%>
+    </h1>
+</div>
+<div class="wrapper">
+<div class="summary">
+    <h2>Summary</h2>
+    <div class="stats">
+        <%- include( "./percentbar.html", { label: "Lines", color: stats.linesColor, percent: stats.linesPercentStr, numerator: stats.linesHit, denominator: stats.lines } ) %>
+        <%- include( "./percentbar.html", { label: "Blocks", color: stats.blocksColor, percent: stats.blocksPercentStr, numerator: stats.blocksHit, denominator: stats.blocks } ) %>
+        <%- include( "./percentbar.html", { label: "Functions", color: stats.functionsColor, percent: stats.functionsPercentStr, numerator: stats.functionsHit, denominator: stats.functions } ) %>
+        <%- include( "./percentbar.html", { label: "Scripts", color: stats.scriptsColor, percent: stats.scriptsPercentStr, numerator: stats.scriptsHit, denominator: stats.scripts } ) %>
+    </div>
+</div>
+<div class="content">
+<h2>Files</h2>
+<table id="browser">
+    <thead>
+        <tr>
+            <th class="right">Type</th>
+            <th class="left">Name</th>
+            <th class="right">Coverage</th>
+            <th class="right">Lines</th>
+            <th class="right">Covered</th>
+            <th class="right">Blocks</th>
+            <th class="right">Functions</th>
+            <th class="right">Scripts</th>
+            <th class="right">Hits/Line</th>
+        </tr>
+    </thead>
+    <tbody>
+    <% _.forEach( subObjects, function( entry ) { %>
+        <tr>
+            <td class="right" style="font-weight:bold"><%= entry.type %></td>
+            <td class="left"><a class='dir' href="<%- entry.url %>"><%= entry.name %></a></td>
+            <td class="right"><%= entry.linesPercentStr %></td>
+            <td class="right"><%= entry.lines %></td>
+            <td class="right"><%= entry.linesHit %></td>
+            <td class="right"><%= entry.blocks %></td>
+            <td class="right"><%= entry.functions %></td>
+            <td class="right"><%= entry.scripts %></td>
+            <td class="right"><%= entry.hitsPerLine %></td>
+        </tr>
+    <% } ); %>
+    <% _.forEach( scripts, function( entry ) { %>
+        <tr>
+            <td class="right"><%= entry.type %></td>
+            <td class="left"><a href="<%- entry.url %>"><%= entry.name %></a></td>
+            <td class="right"><%= entry.linesPercentStr %></td>
+            <td class="right"><%= entry.lines %></td>
+            <td class="right"><%= entry.linesHit %></td>
+            <td class="right"><%= entry.blocks %></td>
+            <td class="right"><%= entry.functions %></td>
+            <td class="right"><%= entry.scripts %></td>
+            <td class="right"><%= entry.hitsPerLine %></td>
+        </tr>
+    <% } ); %>
+    </tbody>
+</table>
+</div>
+</div>
+<div id='footer' >
+    Coverage report generated on <%- Date() %>
+</div>
+</div>
+<script>
+    var browser = $( '#browser' ).DataTable( {
+        paging: false,
+        "columnDefs": [
+            {
+                // The `data` parameter refers to the data for the cell (defined by the
+                // `data` option, which defaults to the column being worked with, in
+                // this case `data: 0`.
+                "render": function ( data, type, row ) {
+                    return '<div title="' + data + '" class="type-img ' + data + '"></div>';
+                },
+                "type": "object-type",
+                "targets": 0
+            }
+        ]
+    } );
 
+    $.fn.dataTable.ext.type.detect.unshift(
+            function ( d ) {
+                return [ "module", "ospace", "script", "object", "orphan" ].indexOf( d ) !== -1 ? "object-type" : null;
+            }
+    );
+    $.fn.dataTable.ext.type.order[ 'object-type-pre'] = function ( d ) {
+        switch ( d ) {
+            case 'module':   return 1;
+            case 'ospace':   return 2;
+            case 'object':   return 3;
+            case 'orphan':   return 4;
+            case 'script':   return 5;
+        }
+        return 0;
+    };
+</script>
 </body>
 </html>

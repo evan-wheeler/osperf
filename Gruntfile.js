@@ -8,7 +8,7 @@ module.exports = function (grunt) {
     
     browserify: {
         debug: {
-            src: [ "./example/runner.js", "./src/**/*.js" ],
+            src: [ "./example/runner.js" ],
             dest: "./example/profiler.js"
         }
     },

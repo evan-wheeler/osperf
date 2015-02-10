@@ -1,39 +1,95 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title><%= pageTitle %></title>
-    <style>
-        #editor {
-            height:400px;
-            box-sizing:border-box;
-            border:1px solid #a0a0a0;
-            margin:2px;
-        }
+    <title><%- pageTitle %></title>
+    <meta charset="utf-8">
+    <script src="scripts/modernizr.custom.js"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
 
-        ul.crumbs {
-            margin:0px;
-            padding:0px;
-            list-style-type: none;
-        }
+    <script src="<%= reportRoot %>/ace.js" type="text/javascript" charset="utf-8"></script>
+    <script src="<%= reportRoot %>/ext-static_highlight.js"></script>
 
-        ul.crumbs li {
-            display:inline;
-        }
-    </style>
+
+    <link rel="stylesheet" type="text/css" href="<%= reportRoot %>/report.css">
 </head>
 <body>
-    <h1>Report for <%= scriptName %></h1>
-    <ul class="crumbs">
-    <% _.forEach( scriptPath, function(v) { %>
-        <li><span>/</span><a href="<%= v.url %>"><%- v.name %></a></li>
-    <% } ); %>
-    </ul>
-    <div id="editor"><%- code %></div>
-    <script src="<%= relDir %>scripts/ace.js" type="text/javascript" charset="utf-8"></script>
-    <script>
-        var editor = ace.edit("editor");
-        editor.setTheme("ace/theme/chrome");
-        editor.getSession().setMode("ace/mode/oscript");
-    </script>
+<div class="container">
+    <div id='header' class="<%- headerClass %>">
+        <h3>Code Coverage</h3>
+        <h1><% _.forEach( crumbtrail, function(crumb,i) { -%>
+            <% if( i > 0 ) { %> <b> / </b><% } -%>
+            <% if( crumb.url ) { -%>
+            <a href="<%- crumb.url %>"><%- crumb.name %></a>
+            <% } else { %>
+            <span class="self"><%- crumb.name %></span>
+            <% } } ); -%>
+        </h1>
+    </div>
+    <div class="wrapper">
+        <div class="summary">
+            <h2>Summary</h2>
+            <div class="stats">
+                <%- include( "./percentbar.html", { label: "Lines", color: stats.linesColor, percent: stats.linesPercentStr, numerator: stats.linesHit, denominator: stats.lines } ) %>
+                <%- include( "./percentbar.html", { label: "Blocks", color: stats.blocksColor, percent: stats.blocksPercentStr, numerator: stats.blocksHit, denominator: stats.blocks } ) %>
+                <%- include( "./percentbar.html", { label: "Functions", color: stats.functionsColor, percent: stats.functionsPercentStr, numerator: stats.functionsHit, denominator: stats.functions } ) %>
+            </div>
+        </div>
+        <h2>Code</h2>
+        <div class="content">
+            <pre id="editor" class="code" ace-gutter="true" ace-mode="ace/mode/oscript" ace-theme="ace/theme/chrome"><%= code %></pre>
+            <script>
+
+                var highlight = ace.require("ace/ext/static_highlight");
+                var dom = ace.require("ace/lib/dom");
+                function qsa(sel) {
+                    return Array.apply(null, document.querySelectorAll(sel));
+                }
+
+                qsa("#editor").forEach(function (codeEl) {
+                    highlight(codeEl, {
+                        mode: codeEl.getAttribute("ace-mode"),
+                        theme: codeEl.getAttribute("ace-theme"),
+                        startLineNumber: 1,
+                        showGutter: codeEl.getAttribute("ace-gutter"),
+                        trim: true
+                    }, function (highlighted) {
+
+                        var lineFormatting = <%- lineFormatting %>;
+                        var lines = $( 'div.ace_line');
+
+                        lines.each( function( index, el ) {
+
+                            var lineFormat = lineFormatting[index],
+                                gutterStyle = "",
+                                gutterContent = "&nbsp;",
+                                gutterClass = "";
+
+                            if( lineFormat )  {
+
+                                gutterStyle = lineFormat.gutterStyle || "";
+                                gutterClass = lineFormat.gutterClass || "";
+                                gutterContent = lineFormat.gutterContent || "&nbsp;";
+
+                                if( lineFormat.lineStyle ) {
+                                    $( el ).css( lineFormat.lineStyle );
+                                }
+                                if( lineFormat.lineClass ) {
+                                    $( el ).addClass( lineFormat.lineClass );
+                                }
+                            }
+
+                            $( this.children[0] ).after( "<span class='coverage-hit-counter " + gutterClass + "' style='" + gutterStyle + "'>" + gutterContent + "</span>" );
+                        } );
+
+                        $( '#editor').css( 'overflow', 'auto' );
+                    });
+                });
+            </script>
+        </div>
+    </div>
+    <div id='footer' >
+        Coverage report generated on <%- Date() %>
+    </div>
+</div>
 </body>
 </html>
