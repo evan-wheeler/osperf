@@ -1,5 +1,5 @@
 {
-  "name": "oscript_profiler",
+  "name": "osperf",
   "version": "0.0.0",
   "main": "index.js",
   "scripts": {
@@ -13,8 +13,6 @@
     "glob": "~4.3.5",
     "commander": "~2.6.0",
     "async": "~0.9.0",
-    "deep-equal": "~0.2.1",
-    "clone": "~0.2.0",
     "bannockburn": "0.0.2",
     "q": "~1.1.2",
     "event-stream": "~3.2.2",
@@ -63,10 +61,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/evan-syntergy/oparser.git"
+    "url": "https://github.com/evan-syntergy/osperf.git"
   },
   "bugs": {
-    "url": "https://github.com/evan-syntergy/oparser/issues"
+    "url": "https://github.com/evan-syntergy/osperf/issues"
   },
-  "homepage": "https://github.com/evan-syntergy/oparser"
+  "homepage": "https://github.com/evan-syntergy/osperf"
 }
