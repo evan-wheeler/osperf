@@ -6,14 +6,14 @@
     "test": "mocha --reporter spec --bail --check-leaks test/",
     "test-cov": "istanbul cover node_modules/mocha/bin/_mocha -- --reporter dot --check-leaks test/"
   },
-  "author": "",
+  "author": "Evan Wheeler",
   "license": "ISC",
   "dependencies": {
     "lodash": "~2.4.1",
     "glob": "~4.3.5",
     "commander": "~2.6.0",
     "async": "~0.9.0",
-    "bannockburn": "0.0.2",
+    "bannockburn": "0.0.3",
     "q": "~1.1.2",
     "event-stream": "~3.2.2",
     "rimraf": "~2.2.8",

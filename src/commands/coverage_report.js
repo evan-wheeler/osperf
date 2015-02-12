@@ -6,8 +6,7 @@ var fs = require( 'fs'),
     rimraf = require( 'rimraf'),
     ncp = require('ncp').ncp,
     async = require( 'async'),
-    ejs = require( 'ejs'),
-    tinycolor = require( 'tinycolor2' );
+    ejs = require( 'ejs');
 
 var includesPath = path.join( __dirname, "assets/includes"),
     dirTemplatePath = path.join( __dirname, 'assets/creport_dir.html'),
