@@ -90,7 +90,7 @@ function addHeader( startupFiles, mapEntries ) {
     var code =
         "/* Begin profiler setup */\r\n" +
         "if IsUndefined( $_P )\r\n" +
-        "   Script __i = Compiler.Compile( 'function I(String n,Dynamic t);Integer tk,u,ms,us;Frame p=$_P;tk=Date.Tick();u=Date.MicroTick();ms=tk-p.lastTick;us=u-p.lastMicro;p.lastTick=tk;p.lastMicro=u;File.Write(p._fOutput,Str.Format(''>%1,%2,%3'',n,ms,us));end')\r\n" +
+        "   Script __i = Compiler.Compile( 'function I(String n);Integer tk,u,ms,us;Frame p=$_P;tk=Date.Tick();u=Date.MicroTick();ms=tk-p.lastTick;us=u-p.lastMicro;p.lastTick=tk;p.lastMicro=u;File.Write(p._fOutput,Str.Format(''>%1,%2,%3'',n,ms,us));end')\r\n" +
         "   Script __o = Compiler.Compile('function O(String n);Integer tk,u,ms,us;Frame p=$_P;tk=Date.Tick();u=Date.MicroTick();ms=tk-p.lastTick;us=u-p.lastMicro;p.lastTick=tk;p.lastMicro=u;File.Write(p._fOutput,Str.Format(''%1,%2,%3'',n,ms,us));end')\r\n" +
         "   String __lp = $Kernel.SystemPreferences.GetPrefGeneral( 'Logpath' )\r\n" +
         "   String __logf=Str.Format( '%1profile_%2.out',( __lp[1] == '.' && __lp[2] in {'/', '\\'}?$Kernel.ModuleUtils._OTHome()+__lp[3:]:__lp),System.ThreadIndex())\r\n" +

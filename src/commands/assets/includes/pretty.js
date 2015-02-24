@@ -9181,1003 +9181,270 @@ module.exports = Walker;
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
 },{}],10:[function(require,module,exports){
-var Bannockburn = require( '../../bannockburn'),
-    profiler = require( '../src/instrument/profile' ),
-    coverage = require( '../src/instrument/coverage' ),
-    IDGen = require( '../src/idgen'),
+var Bannockburn = require( 'bannockburn'),
     _ = require( 'lodash' );
 
-var Lexer = Bannockburn.Lexer,
-    Parser = Bannockburn.Parser,
-    Walker = Bannockburn.Walker;
-
-window.Walker = Walker;
-window.Parser = Parser();
-
-function doLexer(src) { 
-    'use strict';
-    
-    var lex = new Lexer();
-    var t, tokens;
-    
-    var beginTime = performance.now();
-
-    for( var i = 0; i < 1; ++i ) { 
-        tokens = [];
-        lex.setInput( src );
-        while( ( t = lex.get() ) !== null ) { 
-            tokens.push( t );
-        }    
-    }
-    var endTime = performance.now();
-   
-    document.getElementById( "lexerTime" ).innerHTML = "Tokenize: " + ( ( endTime - beginTime ) / 1.0 ).toFixed( 2 ) + " ms";
-}
-
-function tokenText( t ) {
-    if( t.type === '(nl)' && !t.value !== ';' ) {
-        return "EOL";
-    }
-    
-    return t.value;
-}
-
-function tokenClass( t ) { 
-    if( t.type === '(nl)' ) { 
-        return "nl";
-    }
-    else if( t.type === "(end)" ) {
-        return "eof";
-    }
-    return t.type;
-}
-
-function displayLexResults( tokens ) {
-    var frag = document.createDocumentFragment();
-    
-    var wrapNL = $( '#wrapNL' ).prop( 'checked' );
-    
-    tokens.forEach( function( t ) { 
-        var li = document.createElement("li");
-        li.className = tokenClass( t );
-        li.textContent = tokenText( t );
-
-        $( li ).attr( { 
-            "d-row-from": "" + (t.loc.start.line-1), // line is one based -- make zero based row.
-            "d-row-to": "" + (t.loc.end.line-1), // line is one based -- make zero based row.
-            "d-col-from": t.loc.start.col,
-            "d-col-to": t.loc.end.col + 1 // currently inclusive -- set to 1 passed.
-        } );
-
-        frag.appendChild(li);
-        
-        if( wrapNL && t.type === '(nl)' && t.value !== ';' ) { 
-            frag.appendChild( document.createElement( 'br' ) );
-        }
-    } );
-    
-    $( '#tokens ul' ).html( frag );
-}
-
-function go(source) {
-    var msg, tree;
-    var beginTime = 0, endTime = 0;
-
-    doLexer(source);
-    
-    var parser = Parser();
-    
-    try {
-        beginTime = performance.now();
-        tree = parser.parse( source );
-        endTime = performance.now();
-
-        var validValues = [ "type", 'id', 'value', "default", "name", 'operator', 'left', 'right', 'object', 'callee', 'property', 'argument', 'init', "test", 'first', 'second', 'third', 'fourth', 'direction', 'label', 'declaration', "dataType",  "kind", "returnType", "discriminant" ];
-        var groupValues = [ "cases", "params", "arguments", "body", "consequent", "alternate", "elements", "expression", "declarations", "declarations" ];
-        
-        validValues = validValues.concat( groupValues );
-        
-        var indexPosVals = [ "range" ];
-        var relativePosVals = [ "start", "end", "col", "line", "loc" ];
-        
-        if( $( '#lineColBased' ).prop( "checked" ) ) { 
-            validValues = validValues.concat( relativePosVals );
-        }        
-        if( $( '#indexBased' ).prop( "checked" ) ) { 
-            validValues = validValues.concat( indexPosVals );
-        }        
-        
-        msg = JSON.stringify( tree, validValues, 3 );
-
-        $( '#error').hide();
-
-        document.getElementById( 'results' ).innerHTML = msg
-            .replace(/&/g, '&amp;')
-            .replace(/[<]/g, '&lt;');
-
-    } catch (e) {
-        endTime = performance.now();
-
-        var positionInfo = "";
-
-        if(e.token )  {
-            positionInfo = ", line: " + e.token.loc.start.line + ", column: " + e.token.loc.start.col;
-        }
-
-        $( '#error').html(e.name + ": " + e.message + positionInfo );
-        $( '#error').show();
-    }
-    
-    displayLexResults( parser.getTokens() );    
-    
-    document.getElementById( "parseTime" ).innerHTML = "Parse: " + ( endTime - beginTime ).toFixed( 2 ) + " ms";
-    
-}
-
-function doInstrument(editor) {
-    var parser = Parser(),
-        source = editor.getValue(),
-        gen = new IDGen(),
-        scriptID = "path.";
-
-    function funcIDGen( name ) {
-        return gen.newID( scriptID + name );
-    }
-    
-    try {
-        var tree = parser.parse( source );
-        var result = profiler( parser.getSource(), tree, funcIDGen );
-        editor.setValue( result );
-
-        console.log( "ID decodes: ", gen.getIDs() );
-
-    } catch (e) {
-        window.alert( e.message );
-    }
-}
-
-function doCodeCoverage(editor) {
-    var parser = Parser(),
-        gen = new IDGen(),
-        scriptID = "path.",
-        source = editor.getValue();
-
-    function blockIDGen( info ) {
-        return gen.newID( scriptID + info.func + "[" + info.block + "]" );
-    }
+var Pretty = window.Pretty = function( codeEl ) {
+    this.codeEl = $( codeEl);
+    this.code = this.codeEl.text();
+    this.parser = Bannockburn.Parser();
 
     try {
-        var tree = parser.parse( source );
-        var result = coverage( parser.getSource(), tree, blockIDGen );
-        editor.setValue( result.result );
-
-        console.log( "Functions: ", result.functions );
-        console.log( "Blocks: ", result.blocks );
-
-    } catch (e) {
-        window.alert( e.message );
+        this.ast = this.parser.parse( this.code );
+        this.format();
     }
-}
-
-$( function() { 
-    var editor = ace.edit("editor");
-    editor.setTheme( "ace/theme/eclipse" );
-
-    function doParse() { 
-        var v = editor.getValue();
-        go( v );
+    catch( e ) {
+        console.log(e.message);
+        this.ast = [];
     }
+};
 
-    $( '#tokenList' ).delegate( 'li', 'click', function() { 
-        // fix warnings.
-        editor.$blockScrolling = Infinity;
-        editor.setAnimatedScroll( true );
+Pretty.prototype.getAllTokens = function() {
+    var tokens = this.parser.getTokens(),
+        ws = this.parser.getWhitespace();
 
-        var $el = $( this );
-        
-        var fromRow = parseInt( $el.attr( 'd-row-from' ),10 ),
-            toRow = parseInt( $el.attr( 'd-row-to' ), 10 ),
-            fromCol = parseInt( $el.attr( 'd-col-from' ), 10 ),
-            toCol = parseInt( $el.attr( 'd-col-to' ), 10 );
-        
-        var sel = editor.selection;
-        var newSel = { start: { row: fromRow, column: fromCol }, end: { row: toRow, column: toCol } };
-        
-        editor.scrollToLine( fromRow, false, true, function() {} );
-        sel.setSelectionRange( newSel );
-        editor.focus();
-    } );
-    
-    $( '#indexBased' ).click( function() { 
-    
-    } );
-    
-    $( '#instrument' ).click( function() { 
-        doInstrument( editor );
+    var allTokens = tokens.concat( ws );
+
+    allTokens.sort( function(a,b) {
+        return a.range[0] - b.range[0];
     } );
 
-    $( '#codecoverage' ).click( function() { 
-        doCodeCoverage( editor );
-    } );
-    
-    $( '#wrapNL,#indexBased,#lineColBased' ).click( doParse );
-
-    editor.selection.on( 'changeCursor', function() {
-        var pos = editor.getCursorPosition();
-        $( '#cursor-pos').html( "Line: " + (1+pos.row) + ", Col: " + pos.column );
-    } );
-
-    var throttledParse = _.debounce( doParse, 1000 );
-    editor.on( 'change', throttledParse );
-    
-    doParse();
-} );
-},{"../../bannockburn":1,"../src/idgen":21,"../src/instrument/coverage":22,"../src/instrument/profile":24,"lodash":19}],11:[function(require,module,exports){
-module.exports=require(1)
-},{"./lib/lexer":14,"./lib/parser":16,"./lib/preprocessor":17,"./lib/walker":18,"c:\\app\\projects\\bannockburn\\index.js":1}],12:[function(require,module,exports){
-module.exports=require(2)
-},{"c:\\app\\projects\\bannockburn\\lib\\directive_stack.js":2}],13:[function(require,module,exports){
-module.exports=require(3)
-},{"c:\\app\\projects\\bannockburn\\lib\\language_features.js":3}],14:[function(require,module,exports){
-module.exports=require(4)
-},{"c:\\app\\projects\\bannockburn\\lib\\lexer.js":4,"lodash":19}],15:[function(require,module,exports){
-module.exports=require(5)
-},{"c:\\app\\projects\\bannockburn\\lib\\macros.js":5,"lodash":19}],16:[function(require,module,exports){
-module.exports=require(6)
-},{"./language_features":13,"./lexer":14,"./preprocessor":17,"c:\\app\\projects\\bannockburn\\lib\\parser.js":6,"lodash":19}],17:[function(require,module,exports){
-module.exports=require(7)
-},{"./directive_stack":12,"./macros":15,"c:\\app\\projects\\bannockburn\\lib\\preprocessor.js":7}],18:[function(require,module,exports){
-module.exports=require(8)
-},{"c:\\app\\projects\\bannockburn\\lib\\walker.js":8,"lodash":19}],19:[function(require,module,exports){
-module.exports=require(9)
-},{"c:\\app\\projects\\bannockburn\\node_modules\\lodash\\dist\\lodash.js":9}],20:[function(require,module,exports){
-var pSlice = Array.prototype.slice,
-    _ = require( 'lodash' );
-
-var partial_compare = module.exports = function ( fullObj, partialObj, opts ) {
-  if ( !opts ) opts = {};
-
-  // For simple values, check full equal equivalence  
-  if ( fullObj === partialObj ) {
-    return true;
-  } else if ( fullObj instanceof Date && partialObj instanceof Date ) {
-    return fullObj.getTime() === partialObj.getTime();
-  } else if ( typeof fullObj != 'object' && typeof partialObj != 'object') {
-    // allow some flexibility in matching objects to other types.
-    return opts.strict ? fullObj === partialObj : fullObj == partialObj;
-  } else {
-    // 
-    return checkObjParts(fullObj, partialObj, opts);
-  }
+    return allTokens;
 };
 
-function isNullish(v) {
-  return v === null || v === undefined;
+function makeLine( content ) {
+    return '<div class="ace_line"><span class="ace_gutter ace_gutter-cell" unselectable="on"></span>' + content + '</div>';
 }
 
-function checkObjParts( fullObj, partialObj, opts ) {
-    var i, key;
-
-    var fNull = isNullish( fullObj ), 
-        pNull = isNullish( partialObj ); 
-    
-    // allow two null-ish objects to compare positively, but not if only one is null/undefined.
-    if( fNull && pNull ) {
-        return true;
-    }
-    else if( fNull || pNull ) { 
-        return false;
-    }
-    
-    // allow conversions from arguments to array.
-    if ( _.isArguments(fullObj)) {
-        fullObj = pSlice.call(fullObj);
-    }
-    if( _.isArguments( partialObj ) ) { 
-        partialObj = pSlice.call(partialObj);
-    }
-  
-    var kParts = _.keys(partialObj);
-  
-    // first check keys to make fullObj has all the same keys as partialObj
-    i = kParts.length;
-    while( i-- ) { 
-        key = kParts[i];
-        if( typeof fullObj[key] === 'undefined' ) { 
-            return false;
-        }
-    }
-    
-    // now check all values for every key in partialObj
-    i = kParts.length;
-    while( i-- ) { 
-        key = kParts[i];        
-        if ( !partial_compare( fullObj[key], partialObj[key], opts ) ) {
-            return false;
-        }
-    }
-    
-    return true;
-}
-
-},{"lodash":19}],21:[function(require,module,exports){
-function convertToBase(val,chars) {
-    var str = "",
-        base = chars.length;
-    while( val >= base ) {
-        var r = val % base;
-        val = Math.floor( val / base );
-        str += chars.charAt( r );
-    }
-    return str + chars.charAt( val );
-}
-
-var IDGenerator = module.exports = function( options ) {
-    options = options || {};
-
-    if( options.compress !== false ) {
-        this.chars = options.chars || "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ;:=?@!~#$%&-_";
-    }
-
-    if( options.keep !== false ) {
-        this.idMap = {};
-    }
-
-    this.index = 0;
-};
-
-IDGenerator.prototype.newID = function(arg) {
-    var id = this.index++;
-
-    if( this.chars ) {
-        id = convertToBase( id, this.chars );
-    }
-
-    if( this.idMap && arguments.length ) {
-        this.idMap[id] = arg;
-    }
-
-    return id;
-};
-
-IDGenerator.prototype.getIDs = function() {
-    return this.idMap;
-};
-
-},{}],22:[function(require,module,exports){
-var EditList = require( './edits' ),
-    Walker = require( 'bannockburn').Walker,
-    _ = require( 'lodash' );
-
-/** 
- * Block class
- * Each block represents one or more lines of code that will
- * have to execute if the beginning of the block is reached.
- */
-function Block( blockType, id, startLine ) {
-    this.lines = [ startLine ];
-    this.id = id;
-    this.type = blockType;
-    this.reset = false;
-}
-
-/**
- * Adds a covered line to the block.
- * @param line  The line of code to add to the current block.
- */
-Block.prototype.addLine = function( line ) {
-    if(_.isNumber( line ) && line >= 0 ) {
-        if( _.indexOf( this.lines, line ) === -1 ) {
-            this.lines.push( line );
-        }
-    }
-};
-
-Block.TYPES = {
-    FUNCTION: 0,
-    LOOP: 1,
-    OTHER: 2
-};
-
-
-function defaultIDGenerator( info ) {
-    return info.func + "[" + info.block + "]";
-}
-
-/**
- * Creates a BlockTracker, which is used to keeps track of the code coverage blocks
- * @class
- */
-function BlockTracker( options ) {
-
-    options = options || {};
-
-    var curFunction = null,
-        blockStack = [],
-        blocks = [],
-        blockIndex = 0,
-        rawScript = false;
-
-    var idGenerator = options.idGenerator || defaultIDGenerator,
-        visitFn = options.visitFn,
-        headerFn = options.headerFn,
-        scope = options.scope || this;
-    
-    /** 
-     * Sets the current function.
-     * @param {string} name The name of the function
-     */
-    this.setFunction = function( name ) { 
-        if( blockStack.length > 0 ) { 
-            this.endBlock();
-        }
-        
-        curFunction = name;
-    };
-
-    /**
-     * Gets the current function
-     * @returns {*} the current function name or null
-     */
-    this.getFunction = function() {
-        return curFunction;
-    };
-
-    /**
-     * Determines if the script being processed has code outside of the first function body.
-     * @returns {boolean} true if this script has raw code, false otherwise.
-     */
-    this.hasRawCode = function() {
-        return rawScript;
-    };
-    
-    /**
-     * Adds a line into the appropriate block, which is normally the block that 
-     * is on the top of the stack.
-     * 
-     * @param {Integer} line - The line that should be included.
-     * @param {Integer} insertPos - The character index where instrumentation should be inserted if needed.
-     */
-    this.addLine = function( line, insertPos ) {
-
-        if( blockStack.length === 0 ) {
-            if( rawScript ) { 
-                throw Error( "Extraneous input after last function is invalid." );
-            }
-
-            // We're outside of all functions.
-            this.startBlock( Block.TYPES.FUNCTION, line, insertPos, true );
-            rawScript = true;
-        }
-
-        var top = blockStack[blockStack.length - 1];
-        
-        if( top.reset ) { 
-            this.endBlock();
-            this.startBlock( top.type, line, insertPos );
+function getASTNode( v ) {
+    if( v ) {
+        if( _.isArray( v ) ) {
+            return v[0];
         }
         else {
-            top.addLine( line );
+            return v;
         }
-    };
+    }
+    return null;
+}
 
-    /**
-     * Starts a new block
-     * @param {Integer} type - The block type.
-     * @param {Integer} line - The line where the block begins.
-     * @param {Integer} insertPos - The character index where instrumentation should be inserted.
-     * @param {boolean} [addHeader] - True to add the entry code header.
-     */
-    this.startBlock = function( type, line, insertPos, addHeader ) {
-        if( line > -1 && insertPos > -1 ) {
+function LineFormatter() {
+    this.raw = "";
+    this.formatted = "";
+}
 
-            var blockID = idGenerator.call( scope, {
-                    func: curFunction,
-                    block: blockIndex++
-                } ),
-                block = new Block( type, blockID, line );
-            
-            /*
-            if( blockStack.length > 0 ) {
-                blockStack[blockStack.length - 1].interrupt();
-            }
-            */
+LineFormatter.prototype.expandTabs = function( val, offset ) {
+    offset = offset || 0;
+    return val.split( '\t' ).map( function( v, i, a ) {
+        var t = v + ( i+1 >= a.length ? "" : ([ "    ", "   ", "  ", " " ])[(offset+v.length) % 4]);
+        offset = 0;
+        return t;
+    }).join( "");
+};
 
-            blockStack.push( block );
-            blocks.push( block );
+LineFormatter.prototype.add = function( val, elType, classNames, attrs ) {
+    var expanded = this.expandTabs(val,this.raw.length),
+        replaced = expanded.replace( / /g, "&nbsp;" );
 
-            // add the visit mark here.
-            if( addHeader ) {
-                headerFn( null, insertPos );
-            }
+    this.raw += expanded;
 
-            visitFn.call( options.scope, block, insertPos );
+    if( arguments.length > 1 ) {
+        this.formatted += [ "<", elType, " class='", classNames || "", "' ", attrs || "", ">", replaced, "</", elType, ">" ].join( "" );
+    }
+    else {
+        this.formatted += replaced;
+    }
+};
 
-            return block;
-        }
-        throw Error( "Invalid startBlock argument(s): " + JSON.stringify( arguments ) );
-    };
-    
-    /** 
-     * Ends a block
-     */
-    this.endBlock = function() { 
-        return blockStack.pop();
-    };
-    
-    /** 
-     * Traverses the stack, resetting blocks until a block of type blockType is found.
-     * @param {Integer} blockType - The type of block to find.
-     */
-    this.resetBlockType = function( blockType ) { 
-        var i = blockStack.length;
-        
-        while( i-- ) { 
-            var p = blockStack[i];            
+LineFormatter.prototype.getFormatted = function() {
+    return this.formatted;
+};
 
-            p.reset = true;
-            
-            if( p.type === blockType ) { 
+LineFormatter.prototype.reset = function() {
+    this.raw = "";
+    this.formatted = "";
+};
+
+LineFormatter.prototype.empty = function() {
+    return this.raw === "";
+};
+
+Pretty.prototype.format = function() {
+    var allTokens = this.getAllTokens();
+    var i = 0, len = allTokens.length;
+
+    function setTokenProp( node, property, value, overwrite ) {
+        var found = false;
+        for( var j = i; j < len; j++ ) {
+            var tok = allTokens[j];
+            if( tok.range[0] === node.range[0] && tok.range[1] === node.range[1] && node.value == tok.value ) {
+                if( !tok[property] || overwrite ) {
+                    tok[property] = value;
+                }
+
+                found = true;
                 break;
             }
         }
-    };
-    
-    /** 
-     * Returns the blocks that were defined.
-     */
-    this.getBlocks = function() { 
-        return blocks.map( function(v) {
-            return {
-                id: v.id,
-                lines: v.lines
-            };
-        });
-    };
-}
 
-function noop() { return true; }
-function skipTraverse() { return false; }
-
-function isSimpleOp( node ) {
-    if ( !node ) {
-        return true;
-    }
-    var arg = node[0];
-
-    if( arg.id === "(name)" || arg.id === "(literal)" || arg.arity === 'literal' ) {
-        return true;
-    }
-    else if( arg.type === "MemberExpression" ) {
-        return ( !arg.object || arg.object.id === "(name)" || arg.object.id === "(literal)" || arg.object.arity === "literal" ) &&
-            ( arg.property && ( arg.property.id === "(name)" || arg.property.id === "(literal)" || arg.property.arity === "literal" ) );
-    }
-    return false;
-}
-
-var VISIT_TMPL = _.template( "__cov.('<%= id %>')+=1\n"),
-    TIME_EXIT_TMPL = _.template( "\n$_C.T('<%= blockID %>',.001*(Date.MicroTick()-__t))"),
-    TIME_RTN_TMPL = _.template( "$_C.T('<%= blockID %>',.001*(Date.MicroTick()-__t))\n"),
-    TIME_RTN2_TMPL =  _.template( "Dynamic __r<%= retID %> = <%= arg %>;$_C.T('<%= blockID %>',.001*(Date.MicroTick()-__t));return __r<%= retID %>" );
-
-module.exports = function coverage( src, parseNode, idGenerator, options ) {
-
-    var editList = new EditList( src),
-        functions = [],
-        funcBlockID = "",
-        record_visits = "$_C.v( __cov, -1 )";
-
-    options = options || {};
-
-    var ctx = new BlockTracker( {
-        idGenerator: idGenerator,
-        visitFn: function( block, insertPos ) {
-            editList.insert( VISIT_TMPL( block ), insertPos, "after" );
-        },
-        headerFn: function( block, insertPos ) {
-            editList.insert( "Assoc __cov = Assoc.CreateAssoc( 0 )\n", insertPos, "after" );
-            editList.insert( "$_C.depth += 1\n", insertPos, "after" );
-        }
-    } );
-
-    var walker = new Walker();
-    var rawScriptFix = false;
-
-    /* Some helper functions */
-    function endBlock() {
-        ctx.endBlock();
-    }
-
-    var forLoop = function( node, body ) {
-        ctx.addLine( this.getStartLine( node ), this.getStartPos( node ) );
-        ctx.startBlock( Block.TYPES.LOOP, this.getStartLine( body[0] ), this.getStartPos( body[0] ) );
-    };
-
-    var breakContFn = function( node ) {
-        ctx.addLine( this.getStartLine( node ), this.getStartPos( node ) );
-        ctx.resetBlockType( Block.TYPES.LOOP );
-        return false;
-    };
-
-    var beforeIfAlternate = function (node, alternate ) {
-        if( alternate[0].type !== 'ElseifStatement' ) {
-            ctx.startBlock( Block.TYPES.OTHER, this.getStartLine( alternate[0] ), this.getStartPos( alternate[0] ) );
-        }
-    };
-
-    var afterIfAlternate = function( node, alternate ) {
-        if( alternate[0].type !== 'ElseifStatement' ) {
-            ctx.endBlock();
-        }
-    };
-
-    // make these callbacks do nothing but not cancel.
-    walker.on( [ "FunctionDeclaration",
-        "IfStatement", "ElseifStatement",
-        "ForStatement", "ForCStyleStatement", "ForInStatement",
-        'SwitchCase'
-    ], noop );
-
-    // these callbacks end blocks
-    walker.on( [
-        'after:ForStatement.body', 'after:ForCStyleStatement.body', 'after:ForInStatement.body',
-        'after:IfStatement.consequent', 'after:ElseifStatement.consequent',
-        'after:SwitchCase.consequent', 'after:RepeatStatement.body', 'after:WhileStatement.body'
-    ], endBlock );
-
-    // cancel traversal.
-    walker.on( [
-        'before:FunctionDeclaration.params',
-        'before:ElseifStatement.test',
-        'before:SwitchCase.test',
-        'before:RepeatStatement.test',
-        'before:ForStatement.first', 'before:ForStatement.second', 'before:ForStatement.third',
-        'before:ForInStatement.first',
-        'before:ForCStyleStatement.first', 'before:ForCStyleStatement.second', 'before:ForCStyleStatement.third'
-    ], skipTraverse );
-
-    // handle loops
-    walker.on( [
-        'before:WhileStatement.body', 'before:RepeatStatement.body',
-        'before:ForStatement.body', 'before:ForInStatement.body', 'before:ForCStyleStatement.body'
-    ], forLoop );
-
-    // handle break/continue.
-    walker.on( [
-        'BreakStatement', 'ContinueStatement', 'BreakIfStatement', 'ContinueIfStatement'
-    ], breakContFn );
-
-    walker.on( {
-        'before:FunctionDeclaration.body': function( node, body ) {
-            if( ctx.hasRawCode() ) {
-                if( ctx.getFunction() === null ) {
-                    editList.insert( record_visits + "\n", this.getStartPos( node ), "after" );
-                    rawScriptFix = true;
-                }
-            }
-
-            var firstStmtPos = this.getStartPos(body[0]);
-
-            ctx.setFunction( node.name );
-            var funcBlock = ctx.startBlock(Block.TYPES.FUNCTION, this.getStartLine(node), firstStmtPos, true);
-
-            funcBlockID = funcBlock.id;
-
-            if( options.timings ) {
-                editList.insert( "Integer __t=Date.MicroTick()\n", firstStmtPos, "after" );
-            }
-
-            functions.push( funcBlockID );
-        },
-
-        'after:FunctionDeclaration.body': function( node, body ) {
-            ctx.endBlock();
-            var lastStmt = body[body.length - 1];
-            if( lastStmt.type !== 'ReturnStatement' ) {
-
-                if( options.timings ) {
-                    editList.insert( TIME_EXIT_TMPL( { blockID: funcBlockID } ), this.getEndPos( lastStmt )+1, "before" );
-                }
-
-                editList.insert( "\n" + record_visits, this.getEndPos( lastStmt )+1, "before" );
-            }
-        },
-
-        'before:IfStatement.test': function( node, test ) {
-            ctx.addLine( this.getStartLine( node ), this.getStartPos( node ) );
-            ctx.addLine( this.getStartLine( test[0] ), this.getStartPos( test[0] ) );
-        },
-
-        'before:IfStatement.consequent': function( node, consequent ) {
-            ctx.startBlock( Block.TYPES.OTHER, this.getStartLine( consequent[0] ), this.getStartPos( consequent[0] ) );
-        },
-
-        'before:ElseifStatement.consequent': function( node, consequent ) {
-            ctx.startBlock( Block.TYPES.OTHER, this.getStartLine( node ), this.getStartPos( consequent[0] ) );
-            ctx.addLine( this.getStartLine( node.test[0] ), this.getStartPos( node.test[0] ) );
-        },
-
-        'before:IfStatement.alternate': beforeIfAlternate,
-        'before:ElseifStatement.alternate': beforeIfAlternate,
-        'after:IfStatement.alternate': afterIfAlternate,
-        'after:ElseifStatement.alternate': afterIfAlternate,
-
-        'before:SwitchCase.consequent': function( node, consequent ) {
-            ctx.startBlock( Block.TYPES.OTHER, this.getStartLine( consequent[0] ), this.getStartPos( consequent[0] ) );
-        },
-
-        'ReturnStatement': function( node ) {
-            ctx.addLine( this.getStartLine( node ), this.getStartPos( node ) );
-            ctx.resetBlockType( Block.TYPES.FUNCTION );
-
-            editList.insert( record_visits + "\n", this.getStartPos( node), "after" );
-
-            if( options.timings && funcBlockID ) {
-                var arg = node.argument;
-
-                if( isSimpleOp( arg ) ) {
-                    editList.insert( {
-                        str: TIME_RTN_TMPL( { blockID: funcBlockID } ),
-                        pos: this.getStartPos( node ),
-                        indent: "after"
-                    } );
-                }
-                else {
-                    var expr, start, end;
-                    expr = src.substring(this.getStartPos(arg[0]), this.getEndPos(arg[0]) + 1);
-                    start = this.getStartPos(node);
-                    end = this.getEndPos(node);
-                    editList.replace( start, end+1, TIME_RTN2_TMPL({ arg: expr, blockID: funcBlockID, retID: start }) );
-                }
-            }
-
-            return false;
-        },
-
-        // catch all (if not above).
-        '*': function(node,children,when) {
-            if( !when ) {
-                ctx.addLine( this.getStartLine( node ), this.getStartPos( node ) );
-            }
-        }
-    }).start( parseNode );
-
-    if( ctx.hasRawCode() && !rawScriptFix ) {
-
-        // close out the raw code unless the last statement was a return.
-        var lastStmt = _.isArray( parseNode ) && parseNode.length ? parseNode[parseNode.length - 1] : null;
-
-        if( lastStmt && lastStmt.type !== 'ReturnStatement' ) {
-            editList.insert( "\n" + record_visits, src.length, "before" );
+        if( !found ) {
+            console.log( "Token was not found for node: ", node );
         }
     }
 
-    // convert block data to
+    var keywords = [ "and", "or", "not", "eq", "lt", "gt",
+        "if", "elseif", "else", "for", "switch", "repeat", "while", "end", "function", "until",
+        "in", "to", "downto", "default", "case", "return", "break", "breakif", "continueif", "continue" ];
 
-    return {
-        result: editList.apply(),
-        blocks: ctx.getBlocks(),
-        functions: functions
-    };
-};
-},{"./edits":23,"bannockburn":11,"lodash":19}],23:[function(require,module,exports){
-var _ = require( 'lodash' );
+    var walker = new Bannockburn.Walker();
 
-var Edits = module.exports = function Edits(initialValue) {
-    this.origValue = initialValue;
-    this.edits = [];
-};
+    walker.on( 'CallExpression', function( node ) {
+        if( node.callee ) {
+            var callee = getASTNode( node.callee );
 
-function reverse(s) {
-    var r = "", i = s.length;
-    while( i-- ) {
-        r += s[i];
-    }
-    return r;
-}
+            if( callee.type === 'MemberExpression' ) {
+                var memberExpr = callee,
+                    obj = getASTNode( memberExpr.object),
+                    prop = getASTNode( memberExpr.property );
 
-function findIndent( code, pos ) {
-    var indent = [], p = pos, ch;
-    while( --p > 0 ) {
-        ch = code.charAt( p );
-        if( '\t '.indexOf( ch ) !== -1 ) {
-            indent.push(ch);
-        }
-        else if( '\r\n'.indexOf( ch ) !== -1 ) {
-            break;
-        }
-        else {
-            indent = [];
-        }
-    }
-
-    return indent.reverse().join( "" );
-}
-
-Edits.prototype.hasEdits = function() {
-    return this.edits.length > 0;
-};
-
-Edits.prototype.apply = function applyEdits() {
-
-    if( this.edits.length === 0 ) {
-        return this.origValue;
-    }
-
-    var edits = this.edits,
-        code = "" + this.origValue;
-
-    edits.sort( function( a, b ) {
-        var diff = ( a.pos - b.pos );
-
-        if( diff === 0 )  {
-            diff = a.origOrder - b.origOrder;
-        }
-
-        return diff;
-    } );
-
-    var buffers = [], i = -1, len = edits.length, lastPos = 0;
-    var nextPos = {
-        'insert': 'pos',
-        'replace': 'afterPos'
-    };
-
-    while( ++i < len ) {
-        var edit = edits[i];
-        buffers.push( code.substring( lastPos, edit.pos ) );
-        buffers.push( edit.content );
-
-        lastPos = edit[ nextPos[edit.type] || 'pos' ];
-    }
-
-    if( lastPos < code.length ) {
-        buffers.push( code.substring( lastPos, code.length ) );
-    }
-
-    return buffers.join( "" );
-};
-
-Edits.prototype.replace = function( firstIndex, afterIndex, replaceWith ) {
-    this.edits.push( { type: 'replace', pos: firstIndex, afterPos: afterIndex, content: replaceWith, origOrder: this.edits.length } );
-};
-
-Edits.prototype.insert = function( str, beforeIndex, indent ) {
-    if( _.isArray( str ) ) {
-        str.forEach( function(a) {
-            this.insert.apply( this, a );
-        }, this );
-    }
-    else if( _.isObject( str ) ) {
-        // expect key=insert position,
-        // value = string.
-        this.insert( str.str, str.pos, str.indent );
-    }
-    else if( _.isString( str ) ) {
-        var len = str.length, i = -1;
-        if( indent ) {
-            var indentStr = findIndent( this.origValue, beforeIndex );
-
-            if( indent === "after" ) {
-                // indent after means we're most likely adding text at the beginning of a line.
-                str += indentStr;
-            }
-            else {
-                // indent before means we're most likely adding text at the end of a line.
-                // insert any leading newlines, then indent, then reset of text.
-                while( ++i < len ) {
-                    if( "\n\r".indexOf( str[i] ) === -1 ) {
-                        break;
+                if( !obj || obj.type === "ThisExpression" ) {
+                    if( prop.id === '(name)' ) {
+                        setTokenProp( prop, "extra", { type: "MemberCall", callType: "this" }, true );
                     }
                 }
-                str = str.substring( 0, i ) + indentStr + str.substring( i );
+                else if( !memberExpr.computed ) {
+                    setTokenProp( prop, "extra", { type: "MemberCall", callType: "normal" }, true );
+                }
+            }
+            else if( callee.id === "(name)" ) {
+                setTokenProp( callee, "extra", { type: "FunctionCall" }, true );
             }
         }
-
-        this.edits.push( { type: 'insert', pos: beforeIndex, content: str, origOrder: this.edits.length } );
-    }
-    else {
-        throw Error( "Unexpected parameters: " + arguments.toString() );
-    }
-};
-},{"lodash":19}],24:[function(require,module,exports){
-var compare = require( './../compare' ),
-    EditList = require( './edits' ),
-    _ = require( 'lodash'),
-    Walker = require( 'bannockburn').Walker;
-
-    // Walker = require( './walker' );
-
-function isInstrumented( firstStmt ) {
-    return compare( firstStmt, {
-        "type": "ExpressionStatement",
-        "expression": { "type": "CallExpression", "arguments": [ { "id": "(literal)", }, { "id": "this", "value": "this" } ] }
-    } );
-}
-
-var instrCode = {
-    enter: _.template( "$_P.I('<%= funcID %>')\n" ),
-    exit: _.template( "\n$_P.O('<%= funcID %>')" ),
-    rtn1: _.template( "$_P.O('<%= funcID %>')\n" ),
-    rtn2: _.template( "Dynamic __r<%= retID %> = <%= arg %>;$_P.O('<%= funcID %>');return __r<%= retID %>" )
-};
-
-function isSimpleOp( node ) { 
-    if ( !node ) {
-        return true;
-    }
-    var arg = node[0];
-
-    if( arg.id === "(name)" || arg.id === "(literal)" || arg.arity === 'literal' ) {
-        return true;
-    }
-    else if( arg.type === "MemberExpression" ) {
-        return ( !arg.object || arg.object.id === "(name)" || arg.object.id === "(literal)" || arg.object.arity === "literal" ) &&
-                ( arg.property && ( arg.property.id === "(name)" || arg.property.id === "(literal)" || arg.property.arity === "literal" ) );
-    }
-    return false;
-}
-
-function instrument( code, parseTree, idGenerator ) {
-    // walk the parse tree and add code at the beginning of each function definition, before 
-    // each return function, and at the end of each function body.
-    
-    // walk the top level looking for functions...
-    var editList = new EditList( code),
-        funcID;
-
-    var walker = new Walker();
-
-    walker.on( {
-        'before:FunctionDeclaration.body': function( func, body ) {
-            if( isInstrumented( body[0] ) ) {
-                // cancel.
-                return false;
-            }
-
-            funcID = idGenerator( func.name );
-
-            editList.insert( {
-                str: instrCode.enter( { funcID: funcID } ),
-                pos: this.getStartPos( body[0] ),
-                indent: "after"
+    })
+    .on( "FunctionDeclaration", function( node ) {
+        var rtnType = getASTNode( node.dataType );
+        if( rtnType ) {
+            setTokenProp( rtnType, "extra", { type: "VariableType" }, false );
+        }
+        if( node.params ) {
+            node.params.forEach( function(p) {
+                if( p.dataType ) {
+                    setTokenProp( getASTNode( p.dataType ), "extra", { type: "VariableType" }, false );
+                }
             } );
-            return true;
-        },
-        'after:FunctionDeclaration.body': function( func, body ) {
-            var lastStmt = body[body.length - 1];
-            if( lastStmt.type !== 'ReturnStatement' ) {
-                editList.insert( {
-                    str: instrCode.exit( { funcID: funcID } ),
-                    pos: this.getEndPos( lastStmt )+1,
-                    indent: "before"
-                } );
-            }
-        },
-        'ReturnStatement': function( rtnStmt ) {
-            var arg = rtnStmt.argument;
+        }
+        if( node.nameToken ) {
+            setTokenProp( node.nameToken, "extra", { type: "FunctionDeclaration" }, false );
+        }
+    } )
+    .on( "VariableDeclaration", function( node )  {
+        var declType = getASTNode( node.declType );
+        setTokenProp( declType, "extra", { type: "VariableType" }, false );
+    } )
+    .on( "MemberExpression", function( node ) {
+        var obj = getASTNode( node.object),
+            prop = getASTNode( node.property );
 
-            if( isSimpleOp( arg ) ) {
-                editList.insert( {
-                    str: instrCode.rtn1( {funcID: funcID } ),
-                    pos: this.getStartPos( rtnStmt ),
-                    indent: "after"
-                } );
+        if( !prop.computed ) {
+            setTokenProp( prop, "extra", { type: "PropertyName" }, false );
+        }
+    } ).start( this.ast );
+
+    var formatted = [ "<div class='ace-chrome'><div class='ace_static_highlight' style='counter-reset:ace_line'>"],
+        curLine = new LineFormatter();
+
+    var processCommentBlock = function( v, k, a ) {
+        if( k === 0 ) {
+            // first line
+            curLine.add( v );
+            formatted.push( makeLine( curLine.getFormatted() ) );
+            curLine.reset();
+        }
+        else if( k === a.length - 1 ) {
+            // last line
+            curLine.add( v );
+        }
+        else {
+            // middle lines
+            curLine.add( v );
+            formatted.push( makeLine( curLine.getFormatted() ) );
+            curLine.reset();
+        }
+    };
+
+    for( i = 0; i < len; ++i ) {
+        var tok = allTokens[i];
+
+        if( tok.type === '(nl)' && tok.value === '\n' ) {
+            curLine.add( tok.value );
+            formatted.push( makeLine( curLine.getFormatted() ) );
+            curLine.reset();
+        }
+        else if( tok.type === 'LineComment' ) {
+            curLine.add( tok.value, "span", "ace_comment ace_line ace_asp" );
+        }
+        else if( tok.type === 'BlockComment' ) {
+            if( tok.value.indexOf( '\n' ) !== -1 ) {
+                tok.value.split( '\n' ).forEach( processCommentBlock );
             }
             else {
-                var expr = code.substring( this.getStartPos( arg[0] ), this.getEndPos( arg[0] )+1 ),
-                    start = this.getStartPos( rtnStmt ),
-                    end = this.getEndPos( rtnStmt );
-
-                var replaceWith = instrCode.rtn2( { arg: expr, funcID: funcID, retID: start } );
-                editList.replace( start, end+1, replaceWith );
+                curLine.add( tok.value, "span", "ace_comment ace_block ace_asp" );
             }
         }
-    }).start( parseTree );
+        else if( tok.type === "number" ) {
+            curLine.add( tok.value, "span", "ace_constant ace_numeric ace_asp" );
+        }
+        else if( tok.type === "string" ) {
+            if( tok.double ) {
+                curLine.add( '"' + tok.value.replace( /"/g, '""' ) + '"', "span", "ace_quoted ace_string ace_double ace_asp" );
+            }
+            else {
+                curLine.add( "'" + tok.value.replace( /'/g, "''" ) + "'", "span", "ace_quoted ace_string ace_single ace_asp" );
+            }
+        }
+        else if( tok.type === "name" ) {
+            if( tok.extra ) {
+                if( tok.extra.type === "FunctionDeclaration" ) {
+                    curLine.add( tok.value, "span", "ace_entity ace_name ace_function ace_asp" );
+                }
+                else if( tok.extra.type === "VariableType" ) {
+                    curLine.add( tok.value, "span", "ace_support ace_type" );
+                }
+                else if( tok.extra.type === 'MemberCall' ) {
+                    if( tok.extra.callType === "this" ) {
+                        curLine.add( tok.value, "span", "ace_entity ace_name ace_function ace_asp", "callType='this' name='" + tok.value + "'" );
+                    }
+                    else {
+                        curLine.add( tok.value, "span", "ace_entity ace_name ace_function ace_asp" );
+                    }
+                }
+                else if( tok.extra.type === "FunctionCall" ) {
+                    curLine.add( tok.value, "span", "ace_entity ace_name ace_function ace_asp", "callType='local' name='" + tok.value + "'" );
+                }
+                else if( tok.extra.type === "PropertyName" ) {
+                    curLine.add( tok.value, "span", "ace_entity ace_other ace_attribute-name" );
+                }
+            }
+            else {
+                if(_.indexOf( keywords, tok.value.toLowerCase() ) !== -1 ) {
+                    curLine.add( tok.value, "span", "ace_keyword ace_control ace_asp" );
+                }
+                else {
+                    curLine.add( tok.value, "span", "ace_entity ace_name ace_asp" );
+                }
+            }
+        }
+        else {
+            curLine.add( tok.value );
+        }
+    }
 
-    // return the instrumented code.
-    return editList.apply();
-}
+    if( !curLine.empty() ) {
+        formatted.push( makeLine( curLine.getFormatted() ) );
+    }
 
-module.exports = instrument;
-},{"./../compare":20,"./edits":23,"bannockburn":11,"lodash":19}]},{},[10]);
+    formatted.push( "</div></div>" );
+
+    this.codeEl.html( formatted.join( "" ) );
+};
+},{"bannockburn":1,"lodash":9}]},{},[10]);

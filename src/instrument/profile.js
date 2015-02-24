@@ -1,5 +1,5 @@
 var compare = require( './../compare' ),
-    EditList = require( './edits' ),
+    EditList = require( './../edits' ),
     _ = require( 'lodash'),
     Walker = require( 'bannockburn').Walker;
 

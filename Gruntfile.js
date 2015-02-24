@@ -7,9 +7,13 @@ module.exports = function (grunt) {
     },
     
     browserify: {
-        debug: {
+        example: {
             src: [ "./example/runner.js" ],
             dest: "./example/profiler.js"
+        },
+        report: {
+            src: [ "./src/pretty.js" ],
+            dest: "./src/commands/assets/includes/pretty.js"
         }
     },
 

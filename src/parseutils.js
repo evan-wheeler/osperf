@@ -29,3 +29,14 @@ exports.parseFile = function ( filename ) {
     } );
 };
 
+exports.getASTNode = function( v ) {
+    if( v ) {
+        if( _.isArray( v ) ) {
+            return v[0];
+        }
+        else {
+            return v;
+        }
+    }
+    return null;
+};

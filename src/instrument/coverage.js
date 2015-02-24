@@ -1,4 +1,4 @@
-var EditList = require( './edits' ),
+var EditList = require( './../edits' ),
     Walker = require( 'bannockburn').Walker,
     _ = require( 'lodash' );
 
@@ -192,13 +192,35 @@ function BlockTracker( options ) {
 function noop() { return true; }
 function skipTraverse() { return false; }
 
-var VISIT_TMPL = _.template( "__cov.('<%= id %>')+=1\n");
+function isSimpleOp( node ) {
+    if ( !node ) {
+        return true;
+    }
+    var arg = node[0];
 
-module.exports = function coverage( src, parseNode, idGenerator ) {
+    if( arg.id === "(name)" || arg.id === "(literal)" || arg.arity === 'literal' ) {
+        return true;
+    }
+    else if( arg.type === "MemberExpression" ) {
+        return ( !arg.object || arg.object.id === "(name)" || arg.object.id === "(literal)" || arg.object.arity === "literal" ) &&
+            ( arg.property && ( arg.property.id === "(name)" || arg.property.id === "(literal)" || arg.property.arity === "literal" ) );
+    }
+    return false;
+}
+
+var VISIT_TMPL = _.template( "__cov.('<%= id %>')+=1\n"),
+    TIME_EXIT_TMPL = _.template( "\n$_C.T('<%= blockID %>',__t,Date.MicroTick())"),
+    TIME_RTN_TMPL = _.template( "$_C.T('<%= blockID %>',__t,Date.MicroTick())\n"),
+    TIME_RTN2_TMPL =  _.template( "Dynamic __r<%= retID %> = <%= arg %>;$_C.T('<%= blockID %>',__t,Date.MicroTick());return __r<%= retID %>" );
+
+module.exports = function coverage( src, parseNode, idGenerator, options ) {
 
     var editList = new EditList( src),
         functions = [],
+        funcBlockID = "",
         record_visits = "$_C.v( __cov, -1 )";
+
+    options = options || {};
 
     var ctx = new BlockTracker( {
         idGenerator: idGenerator,
@@ -287,15 +309,29 @@ module.exports = function coverage( src, parseNode, idGenerator ) {
                 }
             }
 
+            var firstStmtPos = this.getStartPos(body[0]);
+
             ctx.setFunction( node.name );
-            var funcBlock = ctx.startBlock( Block.TYPES.FUNCTION, this.getStartLine( node ), this.getStartPos( body[0] ), true );
-            functions.push( funcBlock.id );
+            var funcBlock = ctx.startBlock(Block.TYPES.FUNCTION, this.getStartLine(node), firstStmtPos, true);
+
+            funcBlockID = funcBlock.id;
+
+            if( options.timings ) {
+                editList.insert( "Integer __t=Date.MicroTick()\n", firstStmtPos, "after" );
+            }
+
+            functions.push( funcBlockID );
         },
 
         'after:FunctionDeclaration.body': function( node, body ) {
             ctx.endBlock();
             var lastStmt = body[body.length - 1];
             if( lastStmt.type !== 'ReturnStatement' ) {
+
+                if( options.timings ) {
+                    editList.insert( TIME_EXIT_TMPL( { blockID: funcBlockID } ), this.getEndPos( lastStmt )+1, "before" );
+                }
+
                 editList.insert( "\n" + record_visits, this.getEndPos( lastStmt )+1, "before" );
             }
         },
@@ -326,7 +362,28 @@ module.exports = function coverage( src, parseNode, idGenerator ) {
         'ReturnStatement': function( node ) {
             ctx.addLine( this.getStartLine( node ), this.getStartPos( node ) );
             ctx.resetBlockType( Block.TYPES.FUNCTION );
+
             editList.insert( record_visits + "\n", this.getStartPos( node), "after" );
+
+            if( options.timings && funcBlockID ) {
+                var arg = node.argument;
+
+                if( isSimpleOp( arg ) ) {
+                    editList.insert( {
+                        str: TIME_RTN_TMPL( { blockID: funcBlockID } ),
+                        pos: this.getStartPos( node ),
+                        indent: "after"
+                    } );
+                }
+                else {
+                    var expr, start, end;
+                    expr = src.substring(this.getStartPos(arg[0]), this.getEndPos(arg[0]) + 1);
+                    start = this.getStartPos(node);
+                    end = this.getEndPos(node);
+                    editList.replace( start, end+1, TIME_RTN2_TMPL({ arg: expr, blockID: funcBlockID, retID: start }) );
+                }
+            }
+
             return false;
         },
 
@@ -339,7 +396,13 @@ module.exports = function coverage( src, parseNode, idGenerator ) {
     }).start( parseNode );
 
     if( ctx.hasRawCode() && !rawScriptFix ) {
-        editList.insert( "\n" + record_visits, src.length, "before" );
+
+        // close out the raw code unless the last statement was a return.
+        var lastStmt = _.isArray( parseNode ) && parseNode.length ? parseNode[parseNode.length - 1] : null;
+
+        if( lastStmt && lastStmt.type !== 'ReturnStatement' ) {
+            editList.insert( "\n" + record_visits, src.length, "before" );
+        }
     }
 
     // convert block data to

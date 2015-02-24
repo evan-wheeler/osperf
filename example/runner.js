@@ -89,7 +89,7 @@ function go(source) {
         tree = parser.parse( source );
         endTime = performance.now();
 
-        var validValues = [ "type", 'id', 'value', "default", "name", 'operator', 'left', 'right', 'argument', 'init', "test", 'first', 'second', 'third', 'fourth', 'direction', 'label', 'declaration', "dataType",  "kind", "returnType", "discriminant" ];
+        var validValues = [ "type", 'id', 'value', "default", "name", 'operator', 'left', 'right', 'object', 'callee', 'property', 'argument', 'init', "test", 'first', 'second', 'third', 'fourth', 'direction', 'label', 'declaration', "dataType",  "kind", "returnType", "discriminant" ];
         var groupValues = [ "cases", "params", "arguments", "body", "consequent", "alternate", "elements", "expression", "declarations", "declarations" ];
         
         validValues = validValues.concat( groupValues );

@@ -6,7 +6,8 @@ var fs = require( 'fs'),
     rimraf = require( 'rimraf'),
     ncp = require('ncp').ncp,
     async = require( 'async'),
-    ejs = require( 'ejs');
+    ejs = require( 'ejs'),
+    glob = require( 'glob' );
 
 var includesPath = path.join( __dirname, "assets/includes"),
     dirTemplatePath = path.join( __dirname, 'assets/creport_dir.html'),
@@ -22,19 +23,24 @@ var templates = {
  * @param visitFiles - Input coverage files.
  * @param options
  */
-function coverageReport( visitFiles, options ) {
+function coverageReport( visitGlobs, options ) {
+    Q.all( visitGlobs.map( function(g) { return Q.nfcall( glob, g ); } ) )
+    .then( function( results ) {
+        var visitFiles = _.flatten( results );
 
-    // merge the visit files and load the coverage file.
-    Q.spread( [ mergeVisits(visitFiles), loadCoverageFile(options.coverage) ],  function( visits, coverInfo ) {
+        // merge the visit files and load the coverage file.
+        return Q.spread( [ mergeVisits(visitFiles), loadCoverageFile(options.coverage) ],  function( visits, coverInfo ) {
 
-        // We have all our data loaded -- generate the report.
-        generateReport( options.output, visits, coverInfo );
+            // We have all our data loaded -- generate the report.
+            generateReport( options.output, visits, coverInfo );
 
+        } )
     } )
     .catch( function( e ) {
         // some error in mergeVisits or loadCoverageFile.
         console.error( "Error: ", e );
-    } );
+    } )
+    .done();
 }
 
 /**
@@ -73,7 +79,7 @@ function writeReports( reportDir, shellInfo, reportData, dirStats, coverInfo ) {
 
     return Q.nfcall( async.mapLimit, reportData, 10, function(sData, cb) {
         var sourceCode = coverInfo.source[sData.originalPath];
-        writeScriptHTML( reportDir, sData, sourceCode)
+        writeScriptHTML( reportDir, sData, sourceCode, dirStats, reportData )
             .then( function() {
                 cb()
             }, function(err) {
@@ -121,6 +127,11 @@ function calcLineFormatting( blocks ) {
                 lineClass: 'line-hit',
                 gutterContent: "" + block.hits
             } ) );
+
+            if( block.hasOwnProperty( "avgTime" ) && block.lines.length ) {
+                var firstLine = block.lines[0]-1;
+                lines[firstLine] = _.extend( { avgTime: block.avgTime, totalTime: block.totalTime }, lines[firstLine] );
+            }
         }
     } );
 
@@ -133,23 +144,42 @@ function percentToRating(percent) {
     return "good";
 }
 
+function getObjectScripts( obj, scriptStats ) {
+    var p = obj, path = "";
+
+    var allIndexes = [];
+    while( p ) {
+        if( p.scriptsRefs && p.scriptsRefs.length ) {
+            [].push.apply( allIndexes, p.scriptsRefs.map( function( i ) {
+                var s = scriptStats[i];
+                return { name: s.scriptDisplayName, path: path + s.scriptDisplayName };
+            } ) );
+        }
+        p = p.parent;
+        if( p ) {
+            path += "../" ;
+        }
+    }
+
+    return allIndexes;
+}
+
 /**
  *
  * @param reportDir
  * @param scriptData
  * @returns {!Promise}
  */
-function writeScriptHTML( reportDir, scriptData, sourceCode ) {
+function writeScriptHTML( reportDir, scriptData, sourceCode, dirStats, scriptStats ) {
 
     var reportRoot = _.times( scriptData.parentPath.split( "/").length, function() { return ".."; }).join( "/" );
-
-    var scriptDisplayName = scriptData.scriptName.replace( /\.Script$/, "" );
-
+    var scriptDisplayName = scriptData.scriptDisplayName;
     var pathElems = scriptData.parentPath.split( "/"),
         crumbtrail =  makeCrumbtrail( pathElems, scriptDisplayName, "index.html" );
 
-    // gather header stats.
+    var objectScripts = getObjectScripts( scriptData.parent, scriptStats );
 
+    // gather header stats.
     var stats = scriptData.stats;
 
     addSummaryStats( stats, [ "lines", "blocks", "functions" ] );
@@ -166,7 +196,8 @@ function writeScriptHTML( reportDir, scriptData, sourceCode ) {
         stats: stats,
         lineFormatting: JSON.stringify( lineFormatting ),
         headerClass: headerClass,
-        crumbtrail: crumbtrail
+        crumbtrail: crumbtrail,
+        scriptLinks: JSON.stringify( objectScripts )
     } );
 
     return Q.nfcall( fs.writeFile, path.join( reportDir, scriptData.path ) + ".html", content, 'utf8' );
@@ -232,6 +263,7 @@ function writeDirHTML( reportDir, dirName, dirData, dirStats, scriptsData ) {
         var childData = scriptsData[childIndex];
         var childStats = childData.stats;
         addSummaryStats( childStats, [ "lines", "blocks", "functions" ] );
+        childStats.scriptTimeStr = childStats.scriptTime.toFixed( 3 );
 
         return _.extend( {
                 type: "script",
@@ -267,20 +299,43 @@ function writeDirHTML( reportDir, dirName, dirData, dirStats, scriptsData ) {
  * @returns {*}
  */
 function mergeBlocks() {
-    var uniqueCombined = {};
+    var uniqueCombined = {
+        visits: {},
+        timings: {}
+    };
+
+    var matchInt = /'([-_;:=?@!~#$%&a-zA-Z0-9]+)'=([0-9]+)/g,
+        matchReal = /'([-_;:=?@!~#$%&a-zA-Z0-9]+)'=G?([-e.0-9]+)/g,
+        val;
 
     return es.through(
         function write (input) {
+            var pair, match;
             if( input ) {
-                var pair = /'([-_;:=?@!~#$%&a-zA-Z0-9]+)'=([0-9]+)/g,
-                    match;
+                var dest = uniqueCombined.visits;
 
-                while( match = pair.exec(input) ) {
-                    if( uniqueCombined.hasOwnProperty( match[1] ) ) {
-                        uniqueCombined[ match[1] ] += parseInt( match[2], 10 );
+                if( input.substr( 0, 2 ) === 't=' ) {
+                    dest = uniqueCombined.timings;
+
+                    while( match = matchReal.exec(input) ) {
+                        val = parseFloat( match[2] );
+                        if( dest.hasOwnProperty( match[1] ) ) {
+                            dest[ match[1] ] += val;
+                        }
+                        else {
+                            dest[ match[1] ] = val;
+                        }
                     }
-                    else {
-                        uniqueCombined[ match[1] ] = parseInt( match[2], 10 );
+                }
+                else {
+                    while( match = matchInt.exec(input) ) {
+                        val = parseInt( match[2], 10 );
+                        if( dest.hasOwnProperty( match[1] ) ) {
+                            dest[ match[1] ] += val;
+                        }
+                        else {
+                            dest[ match[1] ] = val;
+                        }
                     }
                 }
             }
@@ -299,7 +354,6 @@ function mergeBlocks() {
  * @returns {promise|*} Returns a promise for the result.
  */
 function mergeVisits( files ) {
-
     var d = Q.defer();
 
     var streams = files.map( function(f) {
@@ -441,11 +495,9 @@ function buildDirStats( scriptData, tree ) {
         var curPath = "",
             parent = null;
 
-        // distribute the script stats across all parents.
-        pathElems.forEach( function( elem )  {
+        // distribute the script stats across all parent directories...
+        pathElems.forEach( function( elem ) {
             curPath += elem.label;
-
-            //curNode = curNode[elem.label];
 
             var entry = dirStats[curPath];
 
@@ -455,12 +507,8 @@ function buildDirStats( scriptData, tree ) {
                     type: elem.type,
                     stats: {},
                     scriptsRefs: [],
-                    dirs: []
-                    /*
-                    dirs: _.keys( curNode ).map( function(n) {
-                        return { name: n, path: curPath + '/' + n };
-                    } )
-                     */
+                    dirs: [],
+                    parent: parent
                 };
 
                 if( parent ) {
@@ -479,10 +527,12 @@ function buildDirStats( scriptData, tree ) {
             mergeAdd( entry.stats, scriptInfo.stats );
 
             parent = entry;
-
             curPath += "/";
         } );
 
+        scriptInfo.parent = parent;
+
+        // add this script's index to its object (directory) -- we want this later.
         dirStats[scriptInfo.parentPath].scriptsRefs.push( i );
     } );
 
@@ -517,6 +567,7 @@ function scriptPathToObjInfo( p ) {
 
     objInfo.pathParts.push( { type: 'ospace', label: objInfo.ospace } );
     objInfo.scriptName = fileParts[fileParts.length - 1];
+    objInfo.scriptDisplayName = objInfo.scriptName.replace( /\.Script$/, "" );
 
     var objects = fileParts.slice(0,-1);
 
@@ -534,7 +585,11 @@ function scriptPathToObjInfo( p ) {
     return objInfo;
 }
 
-function collectScriptData( visits, coverInfo ) {
+function collectScriptData( runtimeData, coverInfo ) {
+
+    var visits = runtimeData.visits,
+        timings = runtimeData.timings;
+
 
     // first process all the scripts -- these are the end points.
 
@@ -558,6 +613,9 @@ function collectScriptData( visits, coverInfo ) {
                 location_codes: [],
                 blockCodes: {},
                 stats: {
+                    // timing stats
+                    scriptTime: 0,
+
                     // visit stats
                     functions: 0,
                     functionsHit: 0,
@@ -598,18 +656,28 @@ function collectScriptData( visits, coverInfo ) {
             entry.stats.blocksHit += blockVisits > 0 ? 1 : 0;
             entry.stats.linesHit += blockVisits > 0 ? lineCount : 0;
 
-            if( blockInfo.f && blockVisits ) {
-                // stats.functionHits is number of functions
-                // hit in the script, not invocations.
-                entry.stats.functionsHit++;
-            }
-
             // update the instance hits by block,
             // also keep lines for each block here.
             entry.blockCodes[bID] = {
                 hits: blockVisits || 0,
                 lines: blockLines
             };
+
+            if( blockInfo.f  ) {
+                entry.blockCodes[bID].totalTime = ( timings[bID] || 0 );
+
+                if( blockVisits ) {
+                    // stats.functionsHit is number of functions
+                    // hit in the script, not invocations.
+                    entry.stats.functionsHit++;
+
+                    // for function blocks, add the average execute time to the block entry.
+                    entry.blockCodes[bID].avgTime = entry.blockCodes[bID].totalTime / blockVisits;
+                }
+                else {
+                    entry.blockCodes[bID].avgTime = 0;
+                }
+            }
 
             entry.stats.totalHits += ( blockVisits || 0 ) ;
         } );

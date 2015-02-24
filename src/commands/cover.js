@@ -24,7 +24,8 @@ function cover( modules, options ) {
 
     var params = {
         idGenerator: gen,
-        sourceStore: {}
+        sourceStore: {},
+        timings: options.timings
     };
 
     return parseUtils.listScriptsInModules( modObjs )
@@ -49,15 +50,16 @@ function addHeader(startupFiles) {
     var code =
         "/* Begin coverage setup */\r\n" +
             "if IsUndefined( $_C )\r\n" +
-            "   Script __v = Compiler.Compile( 'Function V(Assoc visited,Integer adj=undefined);if isDefined(adj);.depth+=adj;end;String k;for k in Assoc.keys(visited);.fBlocks.(k)+=visited.(k);end;if .depth<=0||Length(.fBlocks)>500;File.Write(.fOutput,Str.ValueToString(.fBlocks));.fBlocks=Assoc.CreateAssoc(0);if .depth<0;depth=0;end;end;End')\r\n" +
+            "   Script __v = Compiler.Compile( 'Function V(Assoc visited,Integer adj=undefined);if isDefined(adj);.depth+=adj;end;String k;for k in Assoc.keys(visited);.fBlocks.(k)+=visited.(k);end;if .depth<=0||Length(.fBlocks)>500;File.Write(.fOutput,\"v=\"+Str.ValueToString(.fBlocks));.fBlocks=Assoc.CreateAssoc(0);if .depth<0;depth=0;end;end;End')\r\n" +
+            "   Script __t = Compiler.Compile( 'Function V(String blockID,Integer start,Integer stop);Real diff=(start<=stop?stop-start:2147483647-start+stop)*.001;.fTimings.(blockID)+=diff;if .depth<=2||Length(.fTimings)>50;File.Write(.fOutput,\"t=\"+Str.ValueToString(.fTimings));.fTimings=Assoc.CreateAssoc(0);end;End')\r\n" +
             "   String __lp = $Kernel.SystemPreferences.GetPrefGeneral( 'Logpath' )\r\n" +
             "   String __logf=Str.Format( '%1coverage_%2.out',( __lp[1] == '.' && __lp[2] in {'/', '\\'}?$Kernel.ModuleUtils._OTHome()+__lp[3:]:__lp),System.ThreadIndex())\r\n" +
             "   File __tf = File.Open( __logf, File.WriteMode )\r\n" +
             "   if IsError( __tf )\r\n" +
             "       Echo( 'Coverage could not open ', __logf, ' for writing: ', __tf )\r\n" +
             "   end\r\n" +
-            "   Assoc blocks = Assoc.CreateAssoc(0)\r\n" +
-        "   $_C = Frame.New( {}, { { 'depth', 0 }, { 'fOutput', __tf }, { 'V', __v }, { 'fBlocks', blocks } } )\r\n" +
+            "   Assoc blocks = Assoc.CreateAssoc(0), timings = Assoc.CreateAssoc()\r\n" +
+        "   $_C = Frame.New( {}, { { 'depth', 0 }, { 'fOutput', __tf }, { 'V', __v }, { 'T', __t }, { 'fBlocks', blocks }, { 'fTimings', timings } } )\r\n" +
         "end\r\n " +
         "/* End coverage setup */\r\n";
 
@@ -147,7 +149,7 @@ function processEach( params, file, done ) {
         };
 
         // instrument the code.
-        var result = instrument( parseResult.src, parseResult.ast, blockIDGen );
+        var result = instrument( parseResult.src, parseResult.ast, blockIDGen, params );
 
         // write the modified code back to the original file.
         fs.writeFileSync( file, result.result, 'utf8' );
