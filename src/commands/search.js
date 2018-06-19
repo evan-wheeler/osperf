@@ -11,8 +11,8 @@ var Module = require("../module"),
     cmp = require("../compare"),
     EditList = require("../edits");
 
-function search(modules, options) {
-    "use strict";
+function search(modules, options) { 
+    "use strict"; 
 
     if (!_.isArray(modules)) {
         modules = [modules];
@@ -213,15 +213,19 @@ function processEach(params, file, done) {
             var src = parseResult.src;
 
             src = `
-function Dynamic Test(prgCtx)
-    Integer i = 1
-    for i = 1 to 100
-        continueif i == 23
-        breakif i == 24
-        echo( i )
+function x()
+    Boolean isSQL = true
+    String s = "select * from "
+
+    if isSQL 
+        s =  "select * from dtreecore"
+    else 
+        s += "dtree"
     end
-    echo( "done" )
-end`;
+
+    Echo( s )
+End`
+
 
             var parser = Bannockburn.Parser(),
                 ast = parser.parse(src),
@@ -307,10 +311,6 @@ end`;
             w.start(ast);
             */
 
-            function nullWalk() {
-                return nullWalk;
-            }
-
             walk(function(node) {
                 if (node) {
                     if (node.type === "FunctionDeclaration") {
@@ -320,9 +320,9 @@ end`;
 
                         console.log(stringifyJSON(result));
 
-                        process.exit(0);
+                        c.printPaths( src );
 
-                        return nullWalk;
+                        process.exit(0);
                     }
                 }
             }, ast);

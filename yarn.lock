@@ -313,12 +313,6 @@ balanced-match@^1.0.0:
   version "1.0.0"
   resolved "https://registry.yarnpkg.com/balanced-match/-/balanced-match-1.0.0.tgz#89b4d199ab2bee49de164ea02b89ce462d71b767"
 
-"bannockburn@https://github.com/evan-wheeler/bannockburn":
-  version "0.0.15"
-  resolved "https://github.com/evan-wheeler/bannockburn#2ac3a4d3addfd25d158b8bdfd5fd29bccd7b67b8"
-  dependencies:
-    lodash latest
-
 "bannockburn@https://github.com/evan-wheeler/bannockburn.git":
   version "0.0.17"
   resolved "https://github.com/evan-wheeler/bannockburn.git#5b77f4d91b1c831b231a729ab0b8279f918c08bd"

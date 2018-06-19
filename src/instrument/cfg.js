@@ -1,6 +1,8 @@
-var _ = require("lodash");
+var _ = require("lodash"),
+    walk = require( './walk' ),
+    cmp = require( "../compare" );
 
-class Builder {
+class Builder { 
     constructor(cfg, current) {
         this.cfg = cfg;
         this.current = current;
@@ -12,7 +14,7 @@ class Builder {
             var label = this.labeledBlock(s.value);
             this.jump(label._goto);
             this.current = label._goto;
-            return;
+            return; 
         }
 
         if (_.isArray(s)) {
@@ -27,7 +29,7 @@ class Builder {
 
         switch (s.type) {
             case "ReturnStatement":
-                this.add(s);
+                this.add(s); 
                 this.current = this.newUnreachableBlock("unreachable.return");
                 break;
             case "BreakStatement": {
@@ -302,12 +304,53 @@ class CFG {
         return b.cfg;
     }
 
-    findPathsToNode(node) {
-        if (this.blocks.length === 0) {
-            return [];
+    findPaths() {
+        let paths = [];
+        
+        function walkSuccs(preds, next ) { 
+            if( _.indexOf( preds, next ) >= 0 ) {
+                // already visited this block...
+                return false;
+            }
+
+            let newPath = _.clone( preds );
+            newPath.push( next );
+
+            let anyNew = next.succs.map( n => walkSuccs( newPath, n ) ).find( v => !!v );
+
+            if( !anyNew ) {  
+                paths.push( newPath )
+            }
+
+            return true;
         }
 
-        this.blocks[0];
+        // paths is a list of lists of blocks... 
+        let entry = this.blocks[0]
+
+        walkSuccs( [], entry );
+        return paths
+    }
+
+    printPaths(code) { 
+        this.findPaths().forEach( path => {
+            console.log( "----------------------------------------------------" );
+            console.log( "Possible path: " );
+
+            path.forEach( b => { 
+                console.log( "===> ", b.comment );
+                console.log( b.getCode(code) );
+            })
+            this.traceVars( path )
+        } )
+    }
+
+    traceVars(path) { 
+        let vars = {};
+        for( let b of path ) {
+            vars = b.traceVars( vars );
+        }
+        console.log( "Vars: ", JSON.stringify( vars, null, 2 ) );
     }
 }
 
@@ -319,6 +362,166 @@ class Block {
         this.succs = [];
         this.unreachable = false;
     }
+
+    containsNode(node) { 
+        if( this.nodes.length > 0 ) { 
+            var start = this.nodes[0].range[0];
+            var end = this.nodes[this.nodes.length - 1].range[1];
+
+            return node.range[0] >= start && node.range[1] <= end;
+        }
+        return false;
+    }
+
+    getCode(code) {
+        if( this.nodes.length > 0 ) { 
+            var start = this.nodes[0].range[0];
+            var end = this.nodes[this.nodes.length - 1].range[1];
+
+            return code.substring(start,end+1)
+        }
+        return "<none>"
+    }
+
+    traceVars(varsIn) { 
+        let varsOut = _.clone( varsIn );
+
+        let visit = (n) => { 
+            if( !n ) return;
+
+            if( isAssignment( n ) ) {
+                let varName = n.left.value.toLowerCase(); 
+                let staticVal = getStaticStr( n.right, varsOut );
+
+                if( staticVal === null )  {
+                    // kill the variable --- not computable...
+                    delete varsOut[varName]
+                } else {
+                    // update the output.
+                    if( n.operator === "=" ) { 
+                        varsOut[varName] = staticVal;
+                    }
+                    else if( n.operator === "+=" ) {
+                        varsOut[varName] += staticVal;
+                    }
+                    else {
+                        delete varsOut[varName]
+                    }
+                }
+
+                return;
+            }
+            else if( isDeclr( n ) ) { 
+                let varName = n.name.value.toLowerCase();
+
+                if( varsIn[varName] ) {
+                    console.log( "shadowed variable ", varName, " -- skipping ...")
+                    delete varsOut[varName]
+                    return;
+                }
+
+                let val = "";
+
+                if (n.init) {
+                    val = getStaticStr(n.init, varsOut);
+
+                    if( val === null )  {
+                        // don't add the var.
+                        return;
+                    }    
+                }
+
+                varsOut[varName] = val; 
+                return;
+            }
+
+            return visit;            
+        }
+
+        walk( visit, this.nodes )
+
+        return varsOut;
+    }
+};
+ 
+var getStaticStr = function(node, vars) {
+    if (_.isArray(node) && node.length === 1) {
+        return getStaticStr(node[0], vars);
+    }
+
+    // If literal string, just return value.
+    if (node.arity === "literal" && typeof node.value === "string") {
+        return node.value;
+    }
+
+    if (node.arity === "name") {
+        if (typeof vars[node.value] === "string") {
+            let varName = node.value.toLowerCase()
+            return vars[varName];
+        }
+    }
+
+    // if $DT_TABLE, return [DTree];
+    if (cmp(node, dtTable)) {
+        // We don't use this format, but it's valid SQL to parse, so this
+        // will be our hint that we need to replace it with $DT_TABLE
+        return "[DTree]";
+    }
+
+    // If static_str + static_str then return result of concatenation.
+    if (node.type === "BinaryExpression" && node.operator === "+") {
+        var left = getStaticStr(node.left, vars);
+        var right = getStaticStr(node.right, vars);
+
+        if (left === null || right === null) {
+            return null;
+        }
+
+        return left + right;
+    }
+
+    return null;
 }
+
+var dtTable = {
+    value: "$",
+    arity: "unary",
+    argument: {
+        value: "DT_TABLE",
+        arity: "literal"
+    },
+    type: "UnaryExpression",
+    operator: "$",
+    prefix: true
+};
+
+var varInit = {
+    type: "VariableDeclarator",
+    name: {
+        arity: "name"
+    },
+    dataType: {
+        value: "String",
+        arity: "name"
+    }
+};
+
+var assignment = {
+    arity: "binary",
+    left: {
+        arity: "name"
+    },
+    right: {},
+    type: "AssignmentExpression"
+};
+
+function isAssignment(node) {
+    return cmp(node, assignment);
+}
+
+function isDeclr(node) {
+    return cmp(node, varInit);
+}
+
 
 module.exports = CFG;
