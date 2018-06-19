@@ -10,7 +10,7 @@
   "license": "ISC",
   "dependencies": {
     "async": "~0.9.0",
-    "bannockburn": "https://github.com/evan-wheeler/bannockburn",
+    "bannockburn": "https://github.com/evan-wheeler/bannockburn.git",
     "commander": "~2.6.0",
     "ejs": "~2.2.4",
     "event-stream": "~3.2.2",

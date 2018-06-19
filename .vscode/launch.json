@@ -1,0 +1,25 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Launch Replace",
+            "program": "${workspaceRoot}\\index.js",
+            "args": ["replace", "package", "pkg", "contentsentry"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Launch Search",
+            "program": "${workspaceRoot}\\index.js",
+            "args": ["search", "replicator"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Launch Program",
+            "program": "${workspaceRoot}\\index.js"
+        }
+    ]
+}

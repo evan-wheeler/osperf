@@ -1,0 +1,14 @@
+{
+  "arity": "binary",
+  "callee": [
+    {
+      "object": {},
+      "property": {
+        "value": "CAPIWrapper",
+        "arity": "literal"
+      },
+      "type": "MemberExpression"
+    }
+  ],
+  "type": "CallExpression"
+}
