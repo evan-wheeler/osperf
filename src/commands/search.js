@@ -11,8 +11,8 @@ var Module = require("../module"),
     cmp = require("../compare"),
     EditList = require("../edits");
 
-function search(modules, options) { 
-    "use strict"; 
+function search(modules, options) {
+    "use strict";
 
     if (!_.isArray(modules)) {
         modules = [modules];
@@ -203,6 +203,22 @@ var countNotStatic = 0,
 
 var commonStatements = {};
 
+function addSource(root, code) {
+    function visit(node) {
+        if (!node) {
+            return;
+        }
+
+        if (node.range) {
+            node.code = code.substring(node.range[0], node.range[1] + 1);
+        }
+
+        return visit;
+    }
+
+    walk(visit, root);
+}
+
 function processEach(params, file, done) {
     // console.log( "Reading file: ", file );
 
@@ -211,51 +227,40 @@ function processEach(params, file, done) {
         .then(function(parseResult) {
             // save the original source code.
             var src = parseResult.src;
+            var ast = parseResult.ast;
 
-            src = `
-function x()
-    Boolean isSQL = true
-    String s = "select * from "
+            addSource(ast, src);
 
-    if isSQL 
-        s =  "select * from dtreecore"
-    else 
-        s += "dtree"
-    end
-
-    Echo( s )
-End`
-
-
-            var parser = Bannockburn.Parser(),
-                ast = parser.parse(src),
-                astNode = parseUtils.getASTNode;
-
-            var origAST = _.cloneDeep(ast);
+            if (src.toLowerCase().indexOf(".execsql(") < 0) {
+                done(null, { result: [] });
+                return;
+            }
 
             // console.log(stringifyJSON(ast));
 
-            /*
             var w = new Bannockburn.Walker();
 
             var curScript = path.basename(file).replace(/\.Script$/, "");
             var curFunction = "";
-
-            var editList = new EditList(src);
-
             var emitDecl = false;
 
-            w.on("VariableDeclarator", function(node) {
-                console.log("Declaration: ", stringifyJSON(node));
-            });
+            var editList = new EditList(src);
+            let lastFn = null;
 
-            w.on("AssignmentExpression", function(node) {
-                console.log("Assignment: ", stringifyJSON(node));
-            });
+            let breakIt = false;
 
             w.on("FunctionDeclaration", function(node) {
                 curFunction = node.name;
                 emitDecl = false;
+                lastFn = node;
+
+                if (curFunction.indexOf("UpdateImportStats") >= 0) {
+                    breakIt = true;
+                }
+            });
+
+            w.on("after:FunctionDeclaration.body", function(node) {
+                lastFn = null;
             });
 
             w.on("CallExpression", function(node) {
@@ -278,57 +283,138 @@ End`
                             commonStatements[stmt]++;
                         }
                     } else {
-                        if (!emitDecl) {
-                            console.log(
-                                "__________________________________________________________"
-                            );
-                            console.log(file, " : ", curFunction);
-                            console.log("==>");
-                            emitDecl = true;
+                        if (lastFn) {
+                            if (arg.arity === "name") {
+                                let curCFG = new cfg();
+                                curCFG.build(lastFn);
+
+                                let varName = arg.value.toLowerCase();
+
+                                // for really simple case, check if variable is assigned only once...
+                                let val = null,
+                                    multi = false;
+                                for (let b of curCFG.blocks) {
+                                    let vars = {};
+                                    vars = b.traceVars(vars);
+
+                                    if (vars && vars.hasOwnProperty(varName)) {
+                                        let v = vars[varName];
+
+                                        if (v === null) {
+                                            // can't compute value.
+                                            val = null;
+                                            break;
+                                        } else if (val === null) {
+                                            val = vars[varName];
+                                        } else {
+                                            multi = true;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if (val && !multi) {
+                                    countStatic++;
+                                    // found it!.
+                                    console.log(
+                                        "Definitive (one assignment) value of ",
+                                        varName,
+                                        ":",
+                                        val
+                                    );
+                                    return;
+                                }
+
+                                // Next case -- look for an assignment in same block....
+
+                                for (let b of curCFG.blocks) {
+                                    if (b.containsNode(arg)) {
+                                        let varsIn = {};
+
+                                        let vars = b.traceVars(
+                                            varsIn,
+                                            arg,
+                                            true
+                                        );
+
+                                        if (
+                                            vars &&
+                                            vars.hasOwnProperty(varName) &&
+                                            typeof vars[varName] === "string"
+                                        ) {
+                                            countStatic++;
+                                            console.log(
+                                                "Definitive (same block assignment) value of ",
+                                                varName,
+                                                ":",
+                                                vars[varName]
+                                            );
+                                            return;
+                                        }
+                                        break;
+                                    }
+                                }
+
+                                let cfgPaths = curCFG.findPaths();
+
+                                let found = false;
+                                let vals = {};
+
+                                cfgPaths.forEach(p => {
+                                    let vars = curCFG.traceVarsTo(p, arg);
+
+                                    if (
+                                        vars.hasOwnProperty(varName) &&
+                                        vars[varName] !== null
+                                    ) {
+                                        vals[vars[varName]] = true;
+                                        found = true;
+                                    }
+                                });
+
+                                if (!emitDecl) {
+                                    console.log(
+                                        "__________________________________________________________"
+                                    );
+                                    console.log(file, " : ", curFunction);
+                                    console.log("==>");
+                                    emitDecl = true;
+                                }
+
+                                countNotStatic++;
+
+                                console.log(" => Statement: ", nodeCode);
+                                console.log(" => Fix: ", argCode);
+
+                                // Try to find possible static values of the sql statement variable.
+
+                                console.log(
+                                    "--------------------------------------------------------"
+                                );
+                                console.log(src);
+                                console.log(
+                                    "--------------------------------------------------------"
+                                );
+
+                                if (found) {
+                                    _.keys(vals).forEach(e => {
+                                        console.log(
+                                            "Possible value of ",
+                                            varName,
+                                            ":",
+                                            e
+                                        );
+                                    });
+                                } else {
+                                    console.log("****** NEED HELP ********");
+                                }
+                            }
                         }
-
-                        countNotStatic++;
-                        console.log(" => Statement: ", nodeCode);
-                        console.log(" => Fix: ", argCode);
-                        console.log(stringifyJSON(arg));
-
-                        // Try to find possible static values of the sql statement variable.
-
-                        console.log(
-                            "--------------------------------------------------------"
-                        );
-                        console.log(src);
-                        console.log(
-                            "--------------------------------------------------------"
-                        );
-
-                        console.log(stringifyJSON(staticTrace(ast, arg, {})));
-                        process.exit(0);
                     }
                 }
             });
 
             w.start(ast);
-            */
-
-            walk(function(node) {
-                if (node) {
-                    if (node.type === "FunctionDeclaration") {
-                        var c = new cfg();
-
-                        var result = c.build(node);
-
-                        console.log(stringifyJSON(result));
-
-                        c.printPaths( src );
-
-                        process.exit(0);
-                    }
-                }
-            }, ast);
-
-            // console.log(stringifyJSON(staticTrace(ast, null, {})));
-            process.exit(0);
 
             // instrument the code.
             // var result = instrument( parseResult.src, parseResult.ast, blockIDGen, params );

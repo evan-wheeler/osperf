@@ -151,7 +151,7 @@ function isSimpleOp(node) {
     return false;
 }
 
-function instrument(code, parseTree, filename) {
+module.exports = function instrument(code, parseTree, filename) {
     // walk the parse tree and add code at the beginning of each function definition, before
     // each return function, and at the end of each function body.
 

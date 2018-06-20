@@ -21,9 +21,13 @@ exports.listScriptsInModules = function(modules) {
 
 exports.parseFile = function(filename) {
   return Q.nfcall(fs.readFile, filename, "utf-8").then(function(content) {
+
+    parser = Bannockburn.Parser();
+    var ast = parser.parse(content);
+
     return {
-      src: content,
-      ast: Bannockburn.Parser().parse(content)
+      src: parser.getSource(),
+      ast: ast
     };
   });
 };
