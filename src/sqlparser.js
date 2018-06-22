@@ -1750,12 +1750,12 @@ module.exports = /*
           return foldStringWord([ u, s ]);
         },
         peg$c541 = function(n) {
-           return keyNode(n);
-          },
-        peg$c542 = peg$anyExpectation(),
-        peg$c543 = function(n) {
             return textNode(n);
           },
+        peg$c542 = function(n) {
+           return keyNode(n);
+          },
+        peg$c543 = peg$anyExpectation(),
         peg$c544 = /^[ \t]/,
         peg$c545 = peg$classExpectation([" ", "\t"], false, false),
         peg$c546 = "\"",
@@ -2086,7 +2086,7 @@ module.exports = /*
         peg$c871 = peg$literalExpectation("WITH", true),
         peg$c872 = "without",
         peg$c873 = peg$literalExpectation("WITHOUT", true),
-        peg$c874 = function(r) { return keyNode(r); },
+        peg$c874 = function(r) { return textNode(r); },
         peg$c875 = function() { return null; },
         peg$c876 = peg$otherExpectation("Line Comment"),
         peg$c877 = "--",
@@ -15747,7 +15747,7 @@ module.exports = /*
         }
         if (s2 !== peg$FAILED) {
           peg$savedPos = s0;
-          s1 = peg$c182(s2);
+          s1 = peg$c541(s2);
           s0 = s1;
         } else {
           peg$currPos = s0;
@@ -15797,7 +15797,7 @@ module.exports = /*
         }
         if (s2 !== peg$FAILED) {
           peg$savedPos = s0;
-          s1 = peg$c541(s2);
+          s1 = peg$c542(s2);
           s0 = s1;
         } else {
           peg$currPos = s0;
@@ -15838,7 +15838,7 @@ module.exports = /*
               peg$currPos++;
             } else {
               s7 = peg$FAILED;
-              if (peg$silentFails === 0) { peg$fail(peg$c542); }
+              if (peg$silentFails === 0) { peg$fail(peg$c543); }
             }
             if (s7 !== peg$FAILED) {
               s6 = [s6, s7];
@@ -15870,7 +15870,7 @@ module.exports = /*
                 peg$currPos++;
               } else {
                 s7 = peg$FAILED;
-                if (peg$silentFails === 0) { peg$fail(peg$c542); }
+                if (peg$silentFails === 0) { peg$fail(peg$c543); }
               }
               if (s7 !== peg$FAILED) {
                 s6 = [s6, s7];
@@ -15893,7 +15893,7 @@ module.exports = /*
             s4 = peg$parsebracket_terminator();
             if (s4 !== peg$FAILED) {
               peg$savedPos = s0;
-              s1 = peg$c543(s3);
+              s1 = peg$c541(s3);
               s0 = s1;
             } else {
               peg$currPos = s0;
@@ -22303,7 +22303,7 @@ module.exports = /*
             peg$currPos++;
           } else {
             s5 = peg$FAILED;
-            if (peg$silentFails === 0) { peg$fail(peg$c542); }
+            if (peg$silentFails === 0) { peg$fail(peg$c543); }
           }
           if (s5 !== peg$FAILED) {
             s4 = [s4, s5];
@@ -22341,7 +22341,7 @@ module.exports = /*
               peg$currPos++;
             } else {
               s5 = peg$FAILED;
-              if (peg$silentFails === 0) { peg$fail(peg$c542); }
+              if (peg$silentFails === 0) { peg$fail(peg$c543); }
             }
             if (s5 !== peg$FAILED) {
               s4 = [s4, s5];
@@ -22461,7 +22461,7 @@ module.exports = /*
           peg$currPos++;
         } else {
           s3 = peg$FAILED;
-          if (peg$silentFails === 0) { peg$fail(peg$c542); }
+          if (peg$silentFails === 0) { peg$fail(peg$c543); }
         }
         if (s3 !== peg$FAILED) {
           s2 = [s2, s3];
@@ -22497,7 +22497,7 @@ module.exports = /*
               peg$currPos++;
             } else {
               s3 = peg$FAILED;
-              if (peg$silentFails === 0) { peg$fail(peg$c542); }
+              if (peg$silentFails === 0) { peg$fail(peg$c543); }
             }
             if (s3 !== peg$FAILED) {
               s2 = [s2, s3];
@@ -22657,7 +22657,7 @@ module.exports = /*
       }
 
       function foldStringKey(parts) {
-        return foldString(parts);
+        return foldString(parts).toLowerCase();
       }
 
       function flattenAll(arr) {
@@ -22684,7 +22684,7 @@ module.exports = /*
       }
 
       function keyNode(node) {
-        return textNode(node);
+        return textNode(node).toLowerCase();
       }
 
       function isArrayOkay(arr) {
