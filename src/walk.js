@@ -1,10 +1,11 @@
-var _ = require("lodash");
+let _ = require("lodash");
 
-var ASTParts = {
+let oscript = {
     FunctionDeclaration: ["params", "body"],
     VariableDeclaration: ["declarations"],
     VariableDeclarator: ["init"],
     UnaryExpression: ["argument"],
+    LogicalExpression: ["left", "right"],
     ThisExpression: [],
     ConditionalExpression: ["test", "consequent", "alternate"],
     MemberExpression: ["object", "property"],
@@ -28,15 +29,14 @@ var ASTParts = {
     ForInStatement: ["first", "body"],
     SwitchStatement: ["discriminant", "cases"],
     SwitchCase: ["test", "consequent"],
+    RelationalExpression: ["left", "right"],
     GotoStatement: [],
     ExpressionStatement: ["expression"]
 };
 
-var SYNTAX = {};
-
-_.forOwn(ASTParts, function(v, k) {
-    SYNTAX[k] = { children: v, name: k };
-});
+function getNodeChildren(n) {
+    return n && n.type ? oscript[n.type] : [];
+}
 
 /**
  * Normalize a node that may be an (empty?) array of statements,
@@ -56,37 +56,31 @@ function nodeToList(n) {
  * @param visitorFn visitor function that receives a non-null node, followed by a null node when children have been processed.  Optionally returns a new visitor function.
  * @param node node on entry, null on exit.
  */
-function Walk(visitorFn, node, label) {
+function Walk(visitorFn, node, label, nodeChildrenFn) {
+    nodeChildrenFn = nodeChildrenFn || getNodeChildren;
+
     var nodes = nodeToList(node);
 
     // block may contain one or more nodes...
-    _.forEach(nodes, function(n) {
-        if (_.isNil(n)) {
-            // skip empty.
-            return;
+    nodes.forEach(n => {
+        if (!_.isNil(n)) {
+            // visit; allow visitor function to return a new visitorFn.
+            var v = visitorFn(n, label);
+
+            if (v) {
+                // walk all child nodes.
+                nodeChildrenFn(n).forEach(prop => {
+                    let childNode = n[prop];
+
+                    if (typeof childNode !== "undefined") {
+                        Walk(v, childNode, prop, nodeChildrenFn);
+                    }
+                });
+
+                // call with null to signal end of node's children.
+                v(null, label);
+            }
         }
-
-        // visit; allow visitor function to return a new visitorFn.
-        var v = visitorFn(n, label);
-        if (!_.isFunction(v)) {
-            // skip
-            return;
-        }
-
-        var syntax = SYNTAX[n.type];
-        if (syntax) {
-            // walk all child nodes.
-            _.forEach(syntax.children, function(prop) {
-                var childNode = n[prop];
-
-                if (!_.isNil(childNode)) {
-                    Walk(v, childNode, prop);
-                }
-            });
-        }
-
-        // call with null to signal end of node's children.
-        v(null, label);
     });
 }
 

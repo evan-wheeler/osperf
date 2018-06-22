@@ -1,5 +1,5 @@
 var _ = require("lodash"),
-    walk = require("./walk"),
+    walk = require("../walk"),
     cmp = require("../compare");
 
 class Builder {

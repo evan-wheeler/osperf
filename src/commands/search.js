@@ -4,7 +4,7 @@ var Module = require("../module"),
     async = require("async"),
     _ = require("lodash"),
     cfg = require("../instrument/cfg"),
-    walk = require("../instrument/walk"),
+    walk = require("../walk"),
     parseUtils = require("../parseutils"),
     Bannockburn = require("bannockburn"),
     path = require("path"),
@@ -203,22 +203,6 @@ var countNotStatic = 0,
 
 var commonStatements = {};
 
-function addSource(root, code) {
-    function visit(node) {
-        if (!node) {
-            return;
-        }
-
-        if (node.range) {
-            node.code = code.substring(node.range[0], node.range[1] + 1);
-        }
-
-        return visit;
-    }
-
-    walk(visit, root);
-}
-
 function processEach(params, file, done) {
     // console.log( "Reading file: ", file );
 
@@ -229,7 +213,7 @@ function processEach(params, file, done) {
             var src = parseResult.src;
             var ast = parseResult.ast;
 
-            addSource(ast, src);
+            parseUtils.addSource(ast, src);
 
             if (src.toLowerCase().indexOf(".execsql(") < 0) {
                 done(null, { result: [] });
@@ -253,10 +237,6 @@ function processEach(params, file, done) {
                 curFunction = node.name;
                 emitDecl = false;
                 lastFn = node;
-
-                if (curFunction.indexOf("UpdateImportStats") >= 0) {
-                    breakIt = true;
-                }
             });
 
             w.on("after:FunctionDeclaration.body", function(node) {
@@ -438,8 +418,6 @@ function processEach(params, file, done) {
         .done();
 }
 
-var x = 0;
-
 function combine(results) {
     console.log("Non-Static SQL statements: ", countNotStatic);
     console.log("Static SQL statements: ", countStatic);
@@ -468,16 +446,7 @@ function combine(results) {
             console.log("Statement [" + v.val + "]: " + v.stmt);
         });
 
-    return results.reduce(
-        function(last, cur) {
-            return {
-                results: last.results.concat(cur.results)
-            };
-        },
-        {
-            results: []
-        }
-    );
+    return [];
 }
 
 module.exports = search;

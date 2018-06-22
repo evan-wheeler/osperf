@@ -18,6 +18,13 @@
         {
             "type": "node",
             "request": "launch",
+            "name": "Launch Unused",
+            "program": "${workspaceRoot}\\index.js",
+            "args": ["unused", "replicator"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
             "name": "Launch Program",
             "program": "${workspaceRoot}\\index.js"
         }
