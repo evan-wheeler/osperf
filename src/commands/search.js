@@ -4,12 +4,12 @@ var Module = require("../module"),
     async = require("async"),
     _ = require("lodash"),
     cfg = require("../instrument/cfg"),
-    walk = require("../walk"),
     parseUtils = require("../parseutils"),
     Bannockburn = require("bannockburn"),
     path = require("path"),
     cmp = require("../compare"),
-    EditList = require("../edits");
+    EditList = require("../edits"),
+    fixQuery = require("../query");
 
 function search(modules, options) {
     "use strict";
@@ -199,7 +199,9 @@ var assignment = {
 };
 
 var countNotStatic = 0,
-    countStatic = 0;
+    countStatic = 0,
+    countFixed = 0,
+    countGood = 0;
 
 var commonStatements = {};
 
@@ -233,6 +235,32 @@ function processEach(params, file, done) {
 
             let breakIt = false;
 
+            const fixit = (q, type) => {
+                if (
+                    q.substr(0, 7).toLowerCase() === "delete " &&
+                    q.substr(7, 4) != "from"
+                ) {
+                    // transform delete from
+                    q = "delete from " + q.substring(7);
+                    console.error("Turning it into ", q);
+                }
+
+                const fixed = fixQuery(q);
+
+                if (fixed === null) {
+                    console.log(`Error parsing ${type}:`, q);
+                    return q;
+                } else if (fixed !== q) {
+                    console.log(`Fixed ${type}:`, fixed);
+                    countFixed++;
+                } else {
+                    console.log(`Good ${type}:`, q);
+                    countGood++;
+                }
+
+                return fixed;
+            };
+
             w.on("FunctionDeclaration", function(node) {
                 curFunction = node.name;
                 emitDecl = false;
@@ -253,7 +281,8 @@ function processEach(params, file, done) {
 
                     if (staticVal !== null) {
                         countStatic++;
-                        console.log("Static: ", staticVal);
+                        // console.log("Static: ", staticVal);
+                        fixit(staticVal, "(static)");
 
                         var stmt = staticVal.toLowerCase();
 
@@ -296,12 +325,8 @@ function processEach(params, file, done) {
                                 if (val && !multi) {
                                     countStatic++;
                                     // found it!.
-                                    console.log(
-                                        "Definitive (one assignment) value of ",
-                                        varName,
-                                        ":",
-                                        val
-                                    );
+                                    // console.log("Definitive (one assignment) value of ", varName, ":", val);
+                                    fixit(val, "(one assignment)");
                                     return;
                                 }
 
@@ -323,11 +348,9 @@ function processEach(params, file, done) {
                                             typeof vars[varName] === "string"
                                         ) {
                                             countStatic++;
-                                            console.log(
-                                                "Definitive (same block assignment) value of ",
-                                                varName,
-                                                ":",
-                                                vars[varName]
+                                            fixit(
+                                                vars[varName],
+                                                "(same block)"
                                             );
                                             return;
                                         }
@@ -352,41 +375,45 @@ function processEach(params, file, done) {
                                     }
                                 });
 
-                                if (!emitDecl) {
+                                const SHOW_PROBLEMS = false;
+                                if (SHOW_PROBLEMS && !emitDecl) {
                                     console.log(
                                         "__________________________________________________________"
                                     );
                                     console.log(file, " : ", curFunction);
-                                    console.log("==>");
                                     emitDecl = true;
                                 }
 
                                 countNotStatic++;
 
-                                console.log(" => Statement: ", nodeCode);
-                                console.log(" => Fix: ", argCode);
+                                if (SHOW_PROBLEMS) {
+                                    console.log(" => Statement: ", nodeCode);
+                                    console.log(" => Fix: ", argCode);
 
-                                // Try to find possible static values of the sql statement variable.
+                                    // Try to find possible static values of the sql statement variable.
 
-                                console.log(
-                                    "--------------------------------------------------------"
-                                );
-                                console.log(src);
-                                console.log(
-                                    "--------------------------------------------------------"
-                                );
+                                    console.log(
+                                        "--------------------------------------------------------"
+                                    );
+                                    console.log(src);
+                                    console.log(
+                                        "--------------------------------------------------------"
+                                    );
 
-                                if (found) {
-                                    _.keys(vals).forEach(e => {
+                                    if (found) {
+                                        _.keys(vals).forEach(e => {
+                                            console.log(
+                                                "Possible value of ",
+                                                varName,
+                                                ":",
+                                                e
+                                            );
+                                        });
+                                    } else {
                                         console.log(
-                                            "Possible value of ",
-                                            varName,
-                                            ":",
-                                            e
+                                            "****** NEED HELP ********"
                                         );
-                                    });
-                                } else {
-                                    console.log("****** NEED HELP ********");
+                                    }
                                 }
                             }
                         }
@@ -421,6 +448,8 @@ function processEach(params, file, done) {
 function combine(results) {
     console.log("Non-Static SQL statements: ", countNotStatic);
     console.log("Static SQL statements: ", countStatic);
+    console.log("Fixed SQL statements: ", countFixed);
+    console.log("Good SQL statements: ", countGood);
 
     var commonList = [];
 

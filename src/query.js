@@ -13,15 +13,20 @@ const rules = [
     ],
     [{ type: "statement", variant: "insert" }, ["into", "result"]],
     [{ type: "statement", variant: "delete" }, ["from", "where"]],
+    [{ type: "statement", variant: "update" }, ["into", "set", "where"]],
     [{ type: "function" }, ["args"]],
     [
         { type: "identifier", format: "table", variant: "expression" },
         ["target", "columns"]
     ],
+    [{ type: "assignment" }, ["target", "value"]],
     [{ type: "expression", format: "binary" }, ["left", "right"]],
+    [{ type: "expression", format: "unary" }, ["expression"]],
     [{ type: "expression", variant: "list" }, ["expression"]],
     [{ type: "expression", variant: "order" }, ["expression"]],
     [{ type: "map", variant: "join" }, ["source", "map"]],
+    [{ type: "map", type: "join" }, ["source", "constraint"]],
+    [{ type: "constraint", variant: "join" }, ["on"]],
     [{ type: "join" }, ["source"]]
 ];
 
@@ -172,13 +177,14 @@ class Scope {
                     return cols.length > 0 ? cols : null;
                 }
 
-                return (
-                    tableResult.columns.find(
-                        c => c.toLowerCase() === colName.toLowerCase()
-                    ) || null
+                let col = tableResult.columns.find(
+                    c => c.toLowerCase() === colName.toLowerCase()
                 );
-            }
 
+                if (col) {
+                    return `${tableRef}.${col}`;
+                }
+            }
             return null;
         }
 
@@ -242,7 +248,7 @@ const isTableOrColumn = n =>
     n.type === "identifier" &&
     (n.variant === "table" || n.variant === "column");
 
-module.exports = function fix(q) {
+module.exports = function fix(q, verbose) {
     let tree;
 
     try {
@@ -267,11 +273,11 @@ module.exports = function fix(q) {
 
         if (tblName !== null && tblName !== n.name) {
             // console.log(`-----------------------------------------`);
-            console.log(`> ${n.name} should be ${tblName}`);
+            // console.log(`> ${n.name} should be ${tblName}`);
             replaceNodeText(n, tblName);
             // console.log(`-----------------------------------------`);
         } else if (tblName === null) {
-            console.log("*** Unknown table: ", n.name);
+            // console.log("*** Unknown table: ", n.name);
         }
 
         scope.addTable(n.name, n.alias, getTableCols(n.name));
@@ -318,7 +324,7 @@ module.exports = function fix(q) {
         }
     };
 
-    const visit = n => {
+    const visit = (n, lbl) => {
         if (n === null) {
             return leave(nodeStack.pop());
         }
@@ -329,7 +335,7 @@ module.exports = function fix(q) {
 
                 if (tblName !== null && tblName !== n.name) {
                     // console.log(`-----------------------------------------`);
-                    console.log(`> ${n.name} should be ${tblName}`);
+                    // console.log(`> ${n.name} should be ${tblName}`);
                     replaceNodeText(n, tblName);
                     // console.log(`-----------------------------------------`);
                 } else if (tblName === null) {
@@ -345,9 +351,7 @@ module.exports = function fix(q) {
                 const colName = scope.resolveColumn(n.name);
 
                 if (colName !== null && colName !== n.name) {
-                    console.log(
-                        `> ${n.name} should be ${JSON.stringify(colName)}`
-                    );
+                    // console.log(  `> ${n.name} should be ${JSON.stringify(colName)}` );
                     replaceNodeText(n, colName);
                 } else if (colName === null) {
                     console.log("*** Unknown column: ", n.name);
@@ -356,7 +360,7 @@ module.exports = function fix(q) {
             return;
         }
 
-        if (n.type === "statement") {
+        if (n.type === "statement" && n.variant !== "list") {
             scope = new Scope(scope);
         }
 
@@ -366,7 +370,9 @@ module.exports = function fix(q) {
 
     walk(visit, tree, "", nextChildren);
 
-    // console.log(JSON.stringify(tree, null, 2));
+    if (verbose) {
+        console.log(JSON.stringify(tree, null, 2));
+    }
 
     return editList.apply();
 };

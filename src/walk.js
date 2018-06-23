@@ -35,7 +35,7 @@ let oscript = {
 };
 
 function getNodeChildren(n) {
-    return n && n.type ? oscript[n.type] : [];
+    return (n && n.type ? oscript[n.type] : []) || [];
 }
 
 /**
