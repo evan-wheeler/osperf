@@ -7132,6 +7132,43 @@
         "event": "Event",
         "eventdesc": "EventDesc"
       }
+    },
+    "information_schema.columns": {
+      "name": "INFORMATION_SCHEMA.COLUMNS",
+      "cols": {
+        "table_catalog": "TABLE_CATALOG",
+        "table_schema": "TABLE_SCHEMA",
+        "table_name": "TABLE_NAME",
+        "column_name": "COLUMN_NAME",
+        "ordinal_position": "ORDINAL_POSITION",
+        "column_default": "COLUMN_DEFAULT",
+        "is_nullable": "IS_NULLABLE",
+        "data_type": "DATA_TYPE",
+        "character_maximum_length": "CHARACTER_MAXIMUM_LENGTH",
+        "character_octet_length": "CHARACTER_OCTET_LENGTH",
+        "numeric_precision": "NUMERIC_PRECISION",
+        "numeric_precision_radix": "NUMERIC_PRECISION_RADIX",
+        "numeric_scale": "NUMERIC_SCALE",
+        "datetime_precision": "DATETIME_PRECISION",
+        "character_set_catalog": "CHARACTER_SET_CATALOG",
+        "character_set_schema": "CHARACTER_SET_SCHEMA",
+        "character_set_name": "CHARACTER_SET_NAME",
+        "collation_catalog": "COLLATION_CATALOG",
+        "collation_schema": "COLLATION_SCHEMA",
+        "collation_name": "COLLATION_NAME",
+        "domain_catalog": "DOMAIN_CATALOG",
+        "domain_schema": "DOMAIN_SCHEMA",
+        "domain_name": "DOMAIN_NAME"
+      }
+    },
+    "information_schema.tables": {
+      "name": "INFORMATION_SCHEMA.TABLES",
+      "cols": {
+        "table_catalog": "TABLE_CATALOG",
+        "table_schema": "TABLE_SCHEMA",
+        "table_name": "TABLE_NAME",
+        "table_type": "TABLE_TYPE"
+      }
     }
   },
   "cols": {}

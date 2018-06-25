@@ -9,7 +9,8 @@ var Module = require("../module"),
     path = require("path"),
     cmp = require("../compare"),
     EditList = require("../edits"),
-    fixQuery = require("../query");
+    fixQuery = require("../query"),
+    getStaticStr = require("../staticval");
 
 function search(modules, options) {
     "use strict";
@@ -138,31 +139,6 @@ var dtTable = {
     prefix: true
 };
 
-function getStaticStr(node) {
-    if (node.arity === "literal" && typeof node.value === "string") {
-        return node.value;
-    }
-
-    if (cmp(node, dtTable)) {
-        // We don't use this format, but it's valid SQL to parse, so this
-        // will be our hint that we need to replace it with $DT_TABLE
-        return "[DTree]";
-    }
-
-    if (node.type === "BinaryExpression" && node.operator === "+") {
-        var left = getStaticStr(node.left);
-        var right = getStaticStr(node.right);
-
-        if (left === null || right === null) {
-            return null;
-        }
-
-        return left + right;
-    }
-
-    return null;
-}
-
 var execSQL = {
     callee: [
         {
@@ -204,6 +180,7 @@ var countNotStatic = 0,
     countGood = 0;
 
 var commonStatements = {};
+var unsolvable = {};
 
 function processEach(params, file, done) {
     // console.log( "Reading file: ", file );
@@ -235,15 +212,13 @@ function processEach(params, file, done) {
 
             let breakIt = false;
 
-            const fixit = (q, type) => {
-                if (
-                    q.substr(0, 7).toLowerCase() === "delete " &&
-                    q.substr(7, 4) != "from"
-                ) {
-                    // transform delete from
-                    q = "delete from " + q.substring(7);
-                    console.error("Turning it into ", q);
+            const fixit = (staticVal, type) => {
+                if (typeof staticVal === "string") {
+                    console.log("Wrong type: ", staticVal);
+                    staticVal = { value: staticVal };
                 }
+
+                let q = staticVal.value;
 
                 const fixed = fixQuery(q);
 
@@ -257,6 +232,11 @@ function processEach(params, file, done) {
                     console.log(`Good ${type}:`, q);
                     countGood++;
                 }
+
+                console.log(
+                    "Static value is: ",
+                    JSON.stringify(staticVal, null, 2)
+                );
 
                 return fixed;
             };
@@ -277,14 +257,14 @@ function processEach(params, file, done) {
                 if (cmp(node, execSQL)) {
                     var arg = node.arguments[1];
                     var argCode = src.substring(arg.range[0], arg.range[1] + 1);
-                    var staticVal = getStaticStr(arg);
+                    var staticVal = getStaticStr(arg, {});
 
                     if (staticVal !== null) {
                         countStatic++;
                         // console.log("Static: ", staticVal);
                         fixit(staticVal, "(static)");
 
-                        var stmt = staticVal.toLowerCase();
+                        var stmt = staticVal.value.toLowerCase();
 
                         if (!commonStatements[stmt]) {
                             commonStatements[stmt] = 1;
@@ -306,8 +286,8 @@ function processEach(params, file, done) {
                                     let vars = {};
                                     vars = b.traceVars(vars);
 
-                                    if (vars && vars.hasOwnProperty(varName)) {
-                                        let v = vars[varName];
+                                    if (vars && vars[varName]) {
+                                        let v = vars[varName].value;
 
                                         if (v === null) {
                                             // can't compute value.
@@ -368,7 +348,8 @@ function processEach(params, file, done) {
 
                                     if (
                                         vars.hasOwnProperty(varName) &&
-                                        vars[varName] !== null
+                                        vars[varName] !== null &&
+                                        vars[varName] !== ""
                                     ) {
                                         vals[vars[varName]] = true;
                                         found = true;
@@ -386,34 +367,34 @@ function processEach(params, file, done) {
 
                                 countNotStatic++;
 
-                                if (SHOW_PROBLEMS) {
-                                    console.log(" => Statement: ", nodeCode);
-                                    console.log(" => Fix: ", argCode);
+                                unsolvable[file] = src;
 
-                                    // Try to find possible static values of the sql statement variable.
+                                console.log(" => Statement: ", nodeCode);
 
-                                    console.log(
-                                        "--------------------------------------------------------"
-                                    );
-                                    console.log(src);
-                                    console.log(
-                                        "--------------------------------------------------------"
-                                    );
+                                // Try to find possible static values of the sql statement variable.
 
-                                    if (found) {
-                                        _.keys(vals).forEach(e => {
-                                            console.log(
-                                                "Possible value of ",
-                                                varName,
-                                                ":",
-                                                e
-                                            );
-                                        });
-                                    } else {
+                                console.log(
+                                    "--------------------------------------------------------"
+                                );
+                                console.log(src);
+                                console.log(
+                                    "--------------------------------------------------------"
+                                );
+
+                                if (found) {
+                                    _.keys(vals).forEach(e => {
+                                        /* 
                                         console.log(
-                                            "****** NEED HELP ********"
+                                            "Possible value of ",
+                                            varName,
+                                            ":",
+                                            e
                                         );
-                                    }
+                                        */
+                                        fixit(e, "(possible value)");
+                                    });
+                                } else {
+                                    console.log("****** NEED HELP ********");
                                 }
                             }
                         }
@@ -474,6 +455,12 @@ function combine(results) {
         .forEach(v => {
             console.log("Statement [" + v.val + "]: " + v.stmt);
         });
+
+    console.log("Problems: ");
+
+    _.forEach(unsolvable, (v, k) =>
+        console.log("-------------------------------\nfile: ", k, "\n", v)
+    );
 
     return [];
 }

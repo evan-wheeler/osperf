@@ -1,6 +1,7 @@
 var _ = require("lodash"),
     walk = require("../walk"),
-    cmp = require("../compare");
+    cmp = require("../compare"),
+    getStaticStr = require("../staticval");
 
 class Builder {
     constructor(cfg, current) {
@@ -309,52 +310,42 @@ class CFG {
     }
 
     findPaths() {
+        if (this.blocks.length > 50) {
+            console.error("********** TOO MANY BLOCKS ****************");
+            console.error(this.blocks.length);
+            console.error("*******************************************");
+            return [];
+        }
+
+        let indexMap = [];
+        this.blocks.forEach(b => (indexMap[b.index] = b));
+
         let paths = [];
 
-        let walkSuccs = (preds, next) => {
-            if (_.indexOf(preds, next) >= 0) {
-                // already visited this block...
-                return false;
+        const addPath = p => {
+            paths.push(p);
+        };
+
+        const walkTree = (chain, node) => {
+            let nextNodes = [];
+            if (node.succs) {
+                nextNodes = node.succs.filter(
+                    s => chain.indexOf(s.index) === -1
+                );
+                nextNodes.forEach(n => walkTree([...chain, node.index], n));
             }
 
-            let newPath = _.clone(preds);
-            newPath.push(next);
-
-            let results = [];
-
-            let quit = next.succs.find(n => {
-                let r = walkSuccs(newPath, n);
-
-                if (r === null) {
-                    return true;
-                }
-
-                results.push(r);
-            });
-
-            if (quit) {
-                return null;
+            if (nextNodes.length === 0) {
+                // nowhere to go -- add to list.
+                addPath([...chain, node.index]);
             }
-
-            let anyNew = results.find(v => !!v);
-
-            if (!anyNew) {
-                if (paths.length > 5000) {
-                    console.log("quitting");
-                    return null;
-                }
-
-                paths.push(newPath);
-            }
-
-            return true;
         };
 
         // paths is a list of lists of blocks...
         let entry = this.blocks[0];
+        walkTree([], entry);
 
-        walkSuccs([], entry);
-        return paths;
+        return paths.map(p => p.map(nIndex => indexMap[nIndex]));
     }
 
     printPaths(code) {
@@ -464,7 +455,10 @@ class Block {
                             varsOut.hasOwnProperty(varName) &&
                             varsOut[varName] !== null
                         ) {
-                            varsOut[varName] += staticVal;
+                            varsOut[varName] = staticPlus(
+                                _.clone(varsOut[varName]),
+                                staticVal
+                            );
                         }
                     } else {
                         console.log("Unknown operator: ", n.operator);
@@ -476,7 +470,10 @@ class Block {
             } else if (isDeclr(n)) {
                 let varName = getNode(n.name).value.toLowerCase();
 
-                if (varsIn.hasOwnProperty(varName) && varsIn[varName] !== "") {
+                if (
+                    varsIn.hasOwnProperty(varName) &&
+                    varsIn[varName].value !== ""
+                ) {
                     console.log(
                         "shadowed variable ",
                         varName,
@@ -519,57 +516,6 @@ var getNode = n => {
         return n[0];
     }
     return n;
-};
-
-var getStaticStr = function(node, vars) {
-    if (_.isArray(node) && node.length === 1) {
-        return getStaticStr(node[0], vars);
-    }
-
-    // If literal string, just return value.
-    if (node.arity === "literal" && typeof node.value === "string") {
-        return node.value;
-    }
-
-    if (node.arity === "name") {
-        if (typeof vars[node.value] === "string") {
-            let varName = node.value.toLowerCase();
-            return vars[varName];
-        }
-    }
-
-    // if $DT_TABLE, return [DTree];
-    if (cmp(node, dtTable)) {
-        // We don't use this format, but it's valid SQL to parse, so this
-        // will be our hint that we need to replace it with $DT_TABLE
-        return "[DTree]";
-    }
-
-    // If static_str + static_str then return result of concatenation.
-    if (node.type === "BinaryExpression" && node.operator === "+") {
-        var left = getStaticStr(node.left, vars);
-        var right = getStaticStr(node.right, vars);
-
-        if (left === null || right === null) {
-            return null;
-        }
-
-        return left + right;
-    }
-
-    return null;
-};
-
-var dtTable = {
-    value: "$",
-    arity: "unary",
-    argument: {
-        value: "DT_TABLE",
-        arity: "literal"
-    },
-    type: "UnaryExpression",
-    operator: "$",
-    prefix: true
 };
 
 var varInit = {

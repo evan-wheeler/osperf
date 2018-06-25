@@ -14,19 +14,30 @@ var program = require("commander"),
 
 // console.log( JSON.parse( str ) );
 
-buildSchema("./src/assets/coldump.1.json", "./src/assets/coldump.json");
+// buildSchema("./src/assets/coldump.1.json", "./src/assets/coldump.json");
+
 /*
 var fixQ = require("./src/query");
 
-const x = [
-    "SELECT trigger_name FROM REPL_INSTALLED_TRIGGERs WHERE TRIGGER_ACTION=:A1 AND UPPER(TABLE_NAME)=:A2",
-    `SELECT a.TRACKING_METHOD "tracking_method", a.KEY_FIELDS "key_fields", (select max(b.TRACKING_TABLE) from REPL_TRACKING_TABLES b where a.TABLE_NAME=b.TABLE_NAME ) "tracking_table" FROM REPL_TRACKED_TABLE_INFO a WHERE a.TABLE_NAME=:A1 `,
-    `insert into dtreemultilingual( dataid,languagecode, name, dcomment ) select dataid, 'en', name, null from dtree where dataid not in ( select dataid from dtreemultilingual )`,
-    `DELETE FROM kUAFPrefs WHERE PrefSKeyword = 'PersonalFavoritesTabs' AND PrefsID = :A1`
-];
-
 [
-    `select k.ID,k.Name,k.Type,c.HOME_SERVER_ID,c.DATAID,c.SERVER_ID,c.SERVER_DATAID from KUAF k left outer JOIN REPL_OBJECT_SERVERS c on (c.home_server_ID=:A1 and server_id=:A2 and c.DataID=k.id) where k.Type in (0,1) or k.Type>102`
+    `
+select 
+    max( X.dt ) LastUpdate 
+from 
+    ( 
+        select
+            max(StartDate) Dt 
+        from 
+            Repl_Batch_Item 
+        where BatchID=:A1 
+        union all 
+        select  
+            max(CompleteDate) DT 
+        from 
+            Repl_Batch_Item 
+        where
+            BatchID=:A2 
+    ) x`
 ].forEach(e => console.log(fixQ(e, true)));
 
 return;

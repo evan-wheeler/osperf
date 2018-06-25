@@ -1586,12 +1586,21 @@ insert_keyword_mod "INSERT OR Modifier"
   }
 
 insert_target
-  = i:( insert_into ) r:( insert_results )
+  = i:( insert_into ) o:( insert_output )? r:( insert_results )
   {
     return Object.assign({
       'into': i
-    }, r);
+    }, r, o);
   }
+
+
+insert_output "INSERT output"
+  = k:(OUTPUT) o e:(expression) o 
+    {
+      return {
+        'output': e
+      };
+    }
 
 insert_into "INTO Clause"
   = s:( insert_into_start ) t:( id_cte )
@@ -1748,8 +1757,11 @@ stmt_delete "DELETE Statement"
   }
 
 delete_start "DELETE Keyword"
-  = s:( DELETE ) o FROM o
+  = s:( DELETE ) o delete_from?
   { return keyNode(s); }
+
+delete_from "DELETE From"
+  = s:( FROM ) o
 
 /**
  * @note
@@ -3135,6 +3147,8 @@ OFFSET
   = "OFFSET"i !name_char
 ON
   = "ON"i !name_char
+OUTPUT  
+  = "OUTPUT"i !name_char
 OR
   = "OR"i !name_char
 ORDER
@@ -3242,7 +3256,7 @@ reserved_word_list
     INITIALLY / INNER / INSERT / INSTEAD / INTERSECT / INTO / IS /
     ISNULL / JOIN / KEY / LEFT / LIKE / LIMIT / MATCH / NATURAL /
     NO / NOT / NOTNULL / NULL / OF / OFFSET / ON / OR / ORDER /
-    OUTER / PLAN / PRAGMA / PRIMARY / QUERY / RAISE / RECURSIVE /
+    OUTER / OUTPUT / PLAN / PRAGMA / PRIMARY / QUERY / RAISE / RECURSIVE /
     REFERENCES / REGEXP / REINDEX / RELEASE / RENAME / REPLACE /
     RESTRICT / RIGHT / ROLLBACK / ROW / SAVEPOINT / SELECT /
     SET / TABLE / TEMPORARY / THEN / TO / TRANSACTION /

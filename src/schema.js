@@ -1,5 +1,16 @@
 var fs = require("fs");
 
+const parseTblCol = c => {
+    const parts = c.trim().split(".");
+
+    if (parts.length === 3) {
+        return { table: `${parts[0]}.${parts[1]}`, column: parts[2] };
+    } else if (parts.length === 2) {
+        return { table: parts[0], column: parts[1] };
+    }
+    return null;
+};
+
 module.exports = buildSchema = (...files) => {
     console.log("Building schema from files: ", files);
 
@@ -11,21 +22,27 @@ module.exports = buildSchema = (...files) => {
         cols = {};
 
     for (s of schema) {
-        let [tableName, colName] = s.trim().split(".");
+        const info = parseTblCol(s);
+
+        if (info === null) {
+            console.log("Cannot parse: ", s);
+            continue;
+        }
+
         let [lowerTableName, lowerColName] = [
-            tableName.toLowerCase(),
-            colName.toLowerCase()
+            info.table.toLowerCase(),
+            info.column.toLowerCase()
         ];
 
         let tblEntry = tables[lowerTableName];
 
         if (!tblEntry) {
             tblEntry = tables[lowerTableName] = {};
-            tblEntry.name = tableName;
+            tblEntry.name = info.table;
             tblEntry.cols = {};
         }
 
-        tblEntry.cols[lowerColName] = colName;
+        tblEntry.cols[lowerColName] = info.column;
     }
 
     fs.writeFileSync(

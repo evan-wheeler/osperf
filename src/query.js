@@ -14,6 +14,8 @@ const rules = [
     [{ type: "statement", variant: "insert" }, ["into", "result"]],
     [{ type: "statement", variant: "delete" }, ["from", "where"]],
     [{ type: "statement", variant: "update" }, ["into", "set", "where"]],
+    [{ type: "statement", variant: "compound" }, ["statement", "compound"]],
+    [{ type: "compound" }, ["statement"]],
     [{ type: "function" }, ["args"]],
     [
         { type: "identifier", format: "table", variant: "expression" },
@@ -47,14 +49,12 @@ class Scope {
     }
 
     addTable(name, alias, columns) {
-        const tblAlias = (typeof alias === "string"
-            ? alias
-            : name
-        ).toLowerCase();
+        const tblAlias = typeof alias === "string" ? alias : name;
         const tblRec = {
             name,
             alias,
-            lookup: tblAlias,
+            lookup: tblAlias.toLowerCase(),
+            ref: tblAlias,
             columns: columns
         };
         this.tables.push(tblRec);
@@ -152,7 +152,9 @@ class Scope {
         let colName, tableRef;
 
         // separate the table reference, if present.
-        let match = /^(?:([_a-zA-Z0-9]+)\.)?((?:\[?[_a-zA-Z0-9]+\]?)|\*)$/.exec(
+        // Allow '.' in table name in case the table reference is like:
+        // INFORMATION_SCHEMA.COLUMNS....
+        let match = /^(?:([._a-zA-Z0-9]+)\.)?((?:\[?[_a-zA-Z0-9]+\]?)|\*)$/.exec(
             name
         );
 
@@ -182,7 +184,7 @@ class Scope {
                 );
 
                 if (col) {
-                    return `${tableRef}.${col}`;
+                    return `${tableResult.ref}.${col}`;
                 }
             }
             return null;
@@ -201,48 +203,41 @@ class Scope {
 const getColumnsFromSelect = (scope, node) => {
     let cols = [];
 
-    node.result.forEach(r => {
-        if (r.type === "statement" && r.variant === "select") {
-            // sub-select in this position must have alias...
-            cols.push(r.alias);
-        } else if (r.type === "identifier") {
-            // should have a name...
-            const col = scope.resolveColumn(r.name, false);
+    if (node.type === "statement") {
+        if (node.variant === "compound") {
+            cols = getColumnsFromSelect(scope, node.statement);
+        } else if (node.variant === "select") {
+            node.result.forEach(r => {
+                if (r.type === "statement" && r.variant === "select") {
+                    // sub-select in this position must have alias...
+                    cols.push(r.alias);
+                } else if (r.type === "identifier") {
+                    // should have a name...
+                    const col = scope.resolveColumn(r.name, false);
 
-            // this may return a single column or if *, may return an array of columns.
-            if (_.isArray(col) && col.length > 0) {
-                cols = cols.concat(col);
-            } else if (col) {
-                cols.push(col);
-            } else {
-                console.log(`${r.name} didn't resolve to any column(s)`);
-            }
-        } else if (r.alias) {
-            // whatever this is is okay if it has an alias.
-            cols.push(r.alias);
-        } else {
-            console.log("Found something else: ", JSON.stringify(r));
+                    // this may return a single column or if *, may return an array of columns.
+                    if (_.isArray(col) && col.length > 0) {
+                        cols = cols.concat(col);
+                    } else if (col) {
+                        cols.push(col);
+                    } else {
+                        console.log(
+                            `${r.name} didn't resolve to any column(s)`
+                        );
+                    }
+                } else if (r.alias) {
+                    // whatever this is is okay if it has an alias.
+                    cols.push(r.alias);
+                } else {
+                    console.log("Found something else: ", JSON.stringify(r));
+                }
+            });
         }
-    });
+    }
 
     // console.log(JSON.stringify(cols));
     return cols;
 };
-
-const test_q = `
-select 
-    1000 taco_beLL,
-    MONKEYID,
-    ( select max(acltype) from dtreeacl where dataid=d.dataid ) bestACL
-from 
-    (select (select Name from dtree where dataid=2000) myName, -1000 ParenTID, x.*, 'monkey' monKeyid from dtreenotify x) d,
-    dtree e,
-    (select * from dtree) f
-where
-    d.dataid in ( select dataid from DTREECORE where subtype=255)
-    and d.parentid < 200000
-order by taco_bell desc;
-    `;
 
 const isTableOrColumn = n =>
     n.type === "identifier" &&
@@ -264,43 +259,49 @@ module.exports = function fix(q, verbose) {
 
     const editList = new Edits(q);
 
-    replaceNodeText = (node, newStr) => {
+    const replaceNodeText = (node, newStr) => {
         editList.replace(node.loc.start.offset, node.loc.end.offset, newStr);
     };
 
-    visitTable = n => {
-        const tblName = getTableName(n.name);
+    const isNestedSourceSelect = n => {
+        if (nodeStack.length) {
+            const pNode = nodeStack[nodeStack.length - 1];
 
-        if (tblName !== null && tblName !== n.name) {
-            // console.log(`-----------------------------------------`);
-            // console.log(`> ${n.name} should be ${tblName}`);
-            replaceNodeText(n, tblName);
-            // console.log(`-----------------------------------------`);
-        } else if (tblName === null) {
-            // console.log("*** Unknown table: ", n.name);
+            return (
+                pNode.type === "map" ||
+                pNode.type === "join" ||
+                pNode.type === "compound" ||
+                (pNode.type === "statement" && pNode.variant === "compound") ||
+                (pNode.type === "statement" &&
+                    pNode.variant === "select" &&
+                    n.type === "statement" &&
+                    n.variant === "compound")
+            );
         }
-
-        scope.addTable(n.name, n.alias, getTableCols(n.name));
+        return false;
     };
 
     const leave = n => {
         if (n) {
+            // console.log(` <= ${n.type} ${n.variant}`);
+
             // console.log(`Exiting ${n.type} ${n.variant}`);
 
-            if (n.type === "statement" && n.variant === "select") {
-                if (
-                    nodeStack.length &&
-                    ["map", "join"].indexOf(
-                        nodeStack[nodeStack.length - 1].type
-                    ) >= 0
-                ) {
-                    if (n.alias && scope.parent) {
+            if (n.type === "statement" && n.variant !== "list") {
+                if (isNestedSourceSelect(n)) {
+                    if (scope.parent) {
                         const hoistCols = getColumnsFromSelect(scope, n);
+                        let alias = n.alias;
+
+                        // compound statements don't need an alias...
+                        if (!alias) {
+                            alias = `<anon${subSelectIndex}>`;
+                        }
 
                         if (hoistCols.length > 0) {
                             scope.parent.addTable(
                                 `<subselect${subSelectIndex++}>`,
-                                n.alias,
+                                alias,
                                 hoistCols
                             );
                         }
@@ -328,6 +329,8 @@ module.exports = function fix(q, verbose) {
         if (n === null) {
             return leave(nodeStack.pop());
         }
+
+        // console.log(` => ${n.type} ${n.variant} ${lbl}`);
 
         if (isTableOrColumn(n)) {
             if (n.variant === "table") {
