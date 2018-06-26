@@ -10,6 +10,7 @@ functions.json
 all_data.txt
 all_stats.txt
 coverage.json
+all.log
 all.txt
 unused.txt
 

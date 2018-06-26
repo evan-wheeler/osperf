@@ -455,10 +455,7 @@ class Block {
                             varsOut.hasOwnProperty(varName) &&
                             varsOut[varName] !== null
                         ) {
-                            varsOut[varName] = staticPlus(
-                                _.clone(varsOut[varName]),
-                                staticVal
-                            );
+                            varsOut[varName] = varsOut[varName].plus(staticVal);
                         }
                     } else {
                         console.log("Unknown operator: ", n.operator);
@@ -483,7 +480,7 @@ class Block {
                     return;
                 }
 
-                let val = "";
+                let val = getStaticStr("");
 
                 if (n.init) {
                     val = getStaticStr(n.init, varsOut);

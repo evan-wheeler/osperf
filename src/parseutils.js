@@ -36,7 +36,8 @@ exports.parseFile = function(filename) {
 
         return {
             src: parser.getSource(),
-            ast: ast
+            ast: ast,
+            comments: parser.getComments()
         };
     });
 };

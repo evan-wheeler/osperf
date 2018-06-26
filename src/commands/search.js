@@ -3,14 +3,10 @@ var Module = require("../module"),
     fs = require("fs"),
     async = require("async"),
     _ = require("lodash"),
-    cfg = require("../instrument/cfg"),
     parseUtils = require("../parseutils"),
-    Bannockburn = require("bannockburn"),
-    path = require("path"),
-    cmp = require("../compare"),
-    EditList = require("../edits"),
-    fixQuery = require("../query"),
-    getStaticStr = require("../staticval");
+    fixSQLCase = require("../instrument/sqlcase");
+
+const header = "// Some SQL statements automatically fixed by osperf... \r\n";
 
 function search(modules, options) {
     "use strict";
@@ -29,17 +25,6 @@ function search(modules, options) {
         .listScriptsInModules(modObjs)
         .then(function(allFiles) {
             return processFiles(allFiles, params);
-        })
-        .then(function(results) {
-            /*
-            var output = genCoverageData( results.blocks, results.functions, gen.getIDs(), params.sourceStore );
-            fs.writeFileSync( options.output, JSON.stringify( output ), 'utf8' );
-
-            // add headers
-            modObjs.forEach( function( m ) {
-                addHeader( m.getStartupScripts() );
-            } );
-            */
         })
         .catch(function(e) {
             console.error("There was a problem: ", e);
@@ -79,109 +64,6 @@ function stringifyJSON(node, noLocFilter) {
     );
 }
 
-var globalVar = {
-    value: "$",
-    arity: "unary",
-    argument: {
-        arity: "literal",
-        decl: false
-    },
-    type: "UnaryExpression",
-    operator: "$",
-    prefix: true
-};
-
-var singleVar = {
-    arity: "name",
-    decl: true
-};
-
-var anyPrgCtx = {
-    value: ".",
-    arity: "binary",
-    object: {
-        value: ".",
-        arity: "binary",
-        object: {},
-        property: {
-            value: "fDBConnect",
-            arity: "literal"
-        },
-        type: "MemberExpression"
-    },
-    property: {
-        value: "fConnection",
-        arity: "literal"
-    },
-    type: "MemberExpression"
-};
-
-var anyDbConnect = {
-    object: {
-        arity: "name"
-    },
-    property: {
-        value: "fConnection",
-        arity: "literal"
-    },
-    type: "MemberExpression"
-};
-
-var dtTable = {
-    value: "$",
-    arity: "unary",
-    argument: {
-        value: "DT_TABLE",
-        arity: "literal"
-    },
-    type: "UnaryExpression",
-    operator: "$",
-    prefix: true
-};
-
-var execSQL = {
-    callee: [
-        {
-            type: "MemberExpression",
-            property: {
-                value: "ExecSQL"
-            }
-        }
-    ]
-};
-
-var varInit = {
-    type: "VariableDeclarator",
-    init: {
-        value: "select * from dtree",
-        arity: "literal"
-    },
-    dataType: {
-        value: "String",
-        arity: "name"
-    }
-};
-
-var assignment = {
-    arity: "binary",
-    left: {
-        arity: "name"
-    },
-    right: {
-        arity: "literal"
-    },
-    type: "AssignmentExpression",
-    operator: "="
-};
-
-var countNotStatic = 0,
-    countStatic = 0,
-    countFixed = 0,
-    countGood = 0;
-
-var commonStatements = {};
-var unsolvable = {};
-
 function processEach(params, file, done) {
     // console.log( "Reading file: ", file );
 
@@ -199,219 +81,18 @@ function processEach(params, file, done) {
                 return;
             }
 
-            // console.log(stringifyJSON(ast));
+            const result = fixSQLCase(src, ast, file);
 
-            var w = new Bannockburn.Walker();
-
-            var curScript = path.basename(file).replace(/\.Script$/, "");
-            var curFunction = "";
-            var emitDecl = false;
-
-            var editList = new EditList(src);
-            let lastFn = null;
-
-            let breakIt = false;
-
-            const fixit = (staticVal, type) => {
-                if (typeof staticVal === "string") {
-                    console.log("Wrong type: ", staticVal);
-                    staticVal = { value: staticVal };
+            if (result.newSource) {
+                if (result.newSource.substring(0, header.length) !== header) {
+                    result.newSource = header + result.newSource;
                 }
 
-                let q = staticVal.value;
-
-                const fixed = fixQuery(q);
-
-                if (fixed === null) {
-                    console.log(`Error parsing ${type}:`, q);
-                    return q;
-                } else if (fixed !== q) {
-                    console.log(`Fixed ${type}:`, fixed);
-                    countFixed++;
-                } else {
-                    console.log(`Good ${type}:`, q);
-                    countGood++;
-                }
-
-                console.log(
-                    "Static value is: ",
-                    JSON.stringify(staticVal, null, 2)
-                );
-
-                return fixed;
-            };
-
-            w.on("FunctionDeclaration", function(node) {
-                curFunction = node.name;
-                emitDecl = false;
-                lastFn = node;
-            });
-
-            w.on("after:FunctionDeclaration.body", function(node) {
-                lastFn = null;
-            });
-
-            w.on("CallExpression", function(node) {
-                var nodeCode = src.substring(node.range[0], node.range[1] + 1);
-
-                if (cmp(node, execSQL)) {
-                    var arg = node.arguments[1];
-                    var argCode = src.substring(arg.range[0], arg.range[1] + 1);
-                    var staticVal = getStaticStr(arg, {});
-
-                    if (staticVal !== null) {
-                        countStatic++;
-                        // console.log("Static: ", staticVal);
-                        fixit(staticVal, "(static)");
-
-                        var stmt = staticVal.value.toLowerCase();
-
-                        if (!commonStatements[stmt]) {
-                            commonStatements[stmt] = 1;
-                        } else {
-                            commonStatements[stmt]++;
-                        }
-                    } else {
-                        if (lastFn) {
-                            if (arg.arity === "name") {
-                                let curCFG = new cfg();
-                                curCFG.build(lastFn);
-
-                                let varName = arg.value.toLowerCase();
-
-                                // for really simple case, check if variable is assigned only once...
-                                let val = null,
-                                    multi = false;
-                                for (let b of curCFG.blocks) {
-                                    let vars = {};
-                                    vars = b.traceVars(vars);
-
-                                    if (vars && vars[varName]) {
-                                        let v = vars[varName].value;
-
-                                        if (v === null) {
-                                            // can't compute value.
-                                            val = null;
-                                            break;
-                                        } else if (val === null) {
-                                            val = vars[varName];
-                                        } else {
-                                            multi = true;
-                                            break;
-                                        }
-                                    }
-                                }
-
-                                if (val && !multi) {
-                                    countStatic++;
-                                    // found it!.
-                                    // console.log("Definitive (one assignment) value of ", varName, ":", val);
-                                    fixit(val, "(one assignment)");
-                                    return;
-                                }
-
-                                // Next case -- look for an assignment in same block....
-
-                                for (let b of curCFG.blocks) {
-                                    if (b.containsNode(arg)) {
-                                        let varsIn = {};
-
-                                        let vars = b.traceVars(
-                                            varsIn,
-                                            arg,
-                                            true
-                                        );
-
-                                        if (
-                                            vars &&
-                                            vars.hasOwnProperty(varName) &&
-                                            typeof vars[varName] === "string"
-                                        ) {
-                                            countStatic++;
-                                            fixit(
-                                                vars[varName],
-                                                "(same block)"
-                                            );
-                                            return;
-                                        }
-                                        break;
-                                    }
-                                }
-
-                                let cfgPaths = curCFG.findPaths();
-
-                                let found = false;
-                                let vals = {};
-
-                                cfgPaths.forEach(p => {
-                                    let vars = curCFG.traceVarsTo(p, arg);
-
-                                    if (
-                                        vars.hasOwnProperty(varName) &&
-                                        vars[varName] !== null &&
-                                        vars[varName] !== ""
-                                    ) {
-                                        vals[vars[varName]] = true;
-                                        found = true;
-                                    }
-                                });
-
-                                const SHOW_PROBLEMS = false;
-                                if (SHOW_PROBLEMS && !emitDecl) {
-                                    console.log(
-                                        "__________________________________________________________"
-                                    );
-                                    console.log(file, " : ", curFunction);
-                                    emitDecl = true;
-                                }
-
-                                countNotStatic++;
-
-                                unsolvable[file] = src;
-
-                                console.log(" => Statement: ", nodeCode);
-
-                                // Try to find possible static values of the sql statement variable.
-
-                                console.log(
-                                    "--------------------------------------------------------"
-                                );
-                                console.log(src);
-                                console.log(
-                                    "--------------------------------------------------------"
-                                );
-
-                                if (found) {
-                                    _.keys(vals).forEach(e => {
-                                        /* 
-                                        console.log(
-                                            "Possible value of ",
-                                            varName,
-                                            ":",
-                                            e
-                                        );
-                                        */
-                                        fixit(e, "(possible value)");
-                                    });
-                                } else {
-                                    console.log("****** NEED HELP ********");
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-
-            w.start(ast);
-
-            // instrument the code.
-            // var result = instrument( parseResult.src, parseResult.ast, blockIDGen, params );
-
-            // write the modified code back to the original file.
-            // fs.writeFileSync( file, result.result, 'utf8' );
+                fs.writeFileSync(file, result.newSource, "utf8");
+            }
 
             // just return the block & function data.
-            done(null, { result: [] });
+            done(null, result);
         })
         .catch(function(e) {
             // don't kill the whole process.
@@ -421,45 +102,32 @@ function processEach(params, file, done) {
                 " in file: ",
                 file
             );
-            done(null, { results: [] });
+            done(null, {});
         })
         .done();
 }
 
-function combine(results) {
-    console.log("Non-Static SQL statements: ", countNotStatic);
-    console.log("Static SQL statements: ", countStatic);
-    console.log("Fixed SQL statements: ", countFixed);
-    console.log("Good SQL statements: ", countGood);
-
-    var commonList = [];
-
-    _.forEach(commonStatements, function(v, k) {
-        if (v > 1) {
-            commonList.push({ stmt: k, val: v });
+const addStats = (stats, cur) => {
+    for (let name of Object.keys(cur)) {
+        if (!stats[name]) {
+            stats[name] = cur[name];
+        } else {
+            stats[name] += cur[name];
         }
-    });
+    }
+};
 
-    console.log(
-        "============================================================="
-    );
-    console.log("Common Statements: ");
-    console.log(
-        "============================================================="
-    );
+function combine(results) {
+    let stats = {};
 
-    commonList
-        .sort((a, b) => {
-            return a.val - b.val;
-        })
-        .forEach(v => {
-            console.log("Statement [" + v.val + "]: " + v.stmt);
-        });
+    for (let r of results) {
+        if (r && r.stats) {
+            addStats(stats, r.stats);
+        }
+    }
 
-    console.log("Problems: ");
-
-    _.forEach(unsolvable, (v, k) =>
-        console.log("-------------------------------\nfile: ", k, "\n", v)
+    Object.keys(stats).forEach(s =>
+        console.log(`${_.padEnd(s, 20, " ")} = ${stats[s]}`)
     );
 
     return [];

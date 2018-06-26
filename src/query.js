@@ -159,7 +159,7 @@ class Scope {
         );
 
         if (!match) {
-            console.log("failed to parse column name");
+            console.log("   SQL Parser: failed to parse column name");
             return null;
         }
 
@@ -222,14 +222,19 @@ const getColumnsFromSelect = (scope, node) => {
                         cols.push(col);
                     } else {
                         console.log(
-                            `${r.name} didn't resolve to any column(s)`
+                            `   SQL Parser: ${
+                                r.name
+                            } didn't resolve to any column(s)`
                         );
                     }
                 } else if (r.alias) {
                     // whatever this is is okay if it has an alias.
                     cols.push(r.alias);
                 } else {
-                    console.log("Found something else: ", JSON.stringify(r));
+                    console.log(
+                        "   SQL Parser: Found something else: ",
+                        JSON.stringify(r)
+                    );
                 }
             });
         }
@@ -249,7 +254,7 @@ module.exports = function fix(q, verbose) {
     try {
         tree = parser(q);
     } catch (e) {
-        console.error(e);
+        console.error(" SQL Parser: ", e);
         return null;
     }
 
@@ -342,7 +347,7 @@ module.exports = function fix(q, verbose) {
                     replaceNodeText(n, tblName);
                     // console.log(`-----------------------------------------`);
                 } else if (tblName === null) {
-                    console.log("*** Unknown table: ", n.name);
+                    console.log("   SQL Parser: *** Unknown table: ", n.name);
                 }
 
                 scope.addTable(n.name, n.alias, getTableCols(n.name));
@@ -357,7 +362,7 @@ module.exports = function fix(q, verbose) {
                     // console.log(  `> ${n.name} should be ${JSON.stringify(colName)}` );
                     replaceNodeText(n, colName);
                 } else if (colName === null) {
-                    console.log("*** Unknown column: ", n.name);
+                    console.log("   SQL Parser: *** Unknown column: ", n.name);
                 }
             }
             return;

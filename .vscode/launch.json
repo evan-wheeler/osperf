@@ -25,6 +25,13 @@
         {
             "type": "node",
             "request": "launch",
+            "name": "Launch Test",
+            "program": "${workspaceRoot}\\index.js",
+            "args": ["test", "${workspaceRoot}\\test\\test.script"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
             "name": "Launch Program",
             "program": "${workspaceRoot}\\index.js"
         }
