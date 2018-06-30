@@ -1,0 +1,46 @@
+function test() 
+    
+    String s = Str.Format( "select %1 from %2", \
+                            "DTreeCore.dataid", \
+                            $DT_TABLE )
+
+    String s1 = Str.Format( "%1 where parentid < 0", s )
+    String o = " order by childcount"
+
+    .ExecSQL( .fPrgCtx, s1 + o )
+
+    String firstPart, stmt, field = "DataId", pID = "PaReNtId"
+    string which = $WhichDB
+
+    switch( which ) 
+        case "HANA", "Oracle"
+           firstPart = "select name, %3 from %1 where %2 "
+        end
+        case "MSSQL"
+            firstPart = "select NAME, DATAID from %1 where %2 "
+        end
+        case "SQLite"
+            firstpart = "select NAME, DATAID, %4 from %1 where %2 "
+        end
+    end
+
+    firstpart = Str.Format( firstpart, "DTreeCore", "exists", field, pID )
+
+    if( $SyntergyCore.SQLUtils.IsOracle() ) 
+        stmt += "select dataid, Ownerid From " + $DT_TABLE + " where Dataid = :A1" 
+    else
+        stmt += "select DaTaId, ownerid, " + \
+            "userid, name From " + \
+                $DT_TABLE + " where " + \
+                "dataID = :A1 order by parentiD desc" 
+    end
+
+    .ExecSQL(dbConnect, Str.fORMAT("SELECT * FROM LLATTRBLOBDATA " + \
+		"WHERE ID=:A1 AND VERNUM IN (%1) ORDER BY VERNUM, SEGMENTID", Str.Catenate($f, ",")[1:-2]), {$f})
+
+ 
+    String realStmt = Str.Format( "%1 (%2)", firstPart, stmt ) + " order by extendeddata"
+
+    .ExecSQL( prgCtx, realStmt, {} )
+
+end

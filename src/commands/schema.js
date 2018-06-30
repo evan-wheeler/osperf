@@ -11,7 +11,7 @@ const parseTblCol = c => {
     return null;
 };
 
-module.exports = buildSchema = (...files) => {
+module.exports = buildSchema = (files, options) => {
     console.log("Building schema from files: ", files);
 
     let schema = files
@@ -29,10 +29,7 @@ module.exports = buildSchema = (...files) => {
             continue;
         }
 
-        let [lowerTableName, lowerColName] = [
-            info.table.toLowerCase(),
-            info.column.toLowerCase()
-        ];
+        let [lowerTableName, lowerColName] = [info.table.toLowerCase(), info.column.toLowerCase()];
 
         let tblEntry = tables[lowerTableName];
 
@@ -45,11 +42,7 @@ module.exports = buildSchema = (...files) => {
         tblEntry.cols[lowerColName] = info.column;
     }
 
-    fs.writeFileSync(
-        "./src/assets/schema.json",
-        JSON.stringify({ tables, cols }, null, 2),
-        {
-            encoding: "utf-8"
-        }
-    );
+    fs.writeFileSync("./src/assets/schema.json", JSON.stringify({ tables, cols }, null, 2), {
+        encoding: "utf-8"
+    });
 };

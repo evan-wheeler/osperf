@@ -1,0 +1,133 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
+
+    <script src="ace.js" type="text/javascript" charset="utf-8"></script>
+    <script src="ext-static_highlight.js"></script>
+    <script src="pretty.js"></script>
+    <link href='http://fonts.googleapis.com/css?family=Open+Sans:400,700|Oswald:400,700' rel='stylesheet' type='text/css'>
+    <link rel="stylesheet" type="text/css" href="report.css">
+</head>
+
+<body>
+    <div class="container">
+        <div id='header' class="">
+            <h3>Header</h3>
+        </div>
+        <div class="wrapper">
+            <div class="summary">
+                <h2>Summary</h2>
+                <div class="stats">
+                    stats
+                </div>
+            </div>
+            <h2>Code</h2>
+            <div class="content">
+                <pre id="editor" class="code" ace-gutter="true" ace-mode="ace/mode/oscript" ace-theme="ace/theme/chrome">
+                Function ThisIsATest() 
+                    for i = 1 to 100
+                        GUID g
+                        // tag:nosqlcheck
+                        $p.ExecSQL( .fPrgCtx, "select * From dtreecore where dataid in (200)" )
+                    end
+                end                    
+                </pre>
+                <script>
+
+                    $(function () {
+                        var editor = $('#editor');
+                        var p = new Pretty(editor[0]);
+                        editor.css('overflow', 'auto');
+
+                        var lineFormatting = [];
+                        var lines = editor.find('div.ace_line');
+
+                        lines.each(function (index, el) {
+                            var lineFormat = lineFormatting[index],
+                                gutterStyle = "",
+                                gutterContent = "&nbsp;",
+                                gutterClass = "",
+                                timingStr = "";
+
+                            var elem = $(el);
+                            elem.attr('line', index);
+
+                            if (lineFormat) {
+                                gutterStyle = lineFormat.gutterStyle || "";
+                                gutterClass = lineFormat.gutterClass || "";
+                                gutterContent = lineFormat.gutterContent || "&nbsp;";
+
+                                if (lineFormat.lineStyle) {
+                                    elem.css(lineFormat.lineStyle);
+                                }
+                                if (lineFormat.lineClass) {
+                                    elem.addClass(lineFormat.lineClass);
+                                }
+
+                                if (lineFormat.hasOwnProperty("totalTime")) {
+                                    timingStr = "<span class='cov-timing' value='total: " + (lineFormat.totalTime / 1000.0).toFixed(3) + "s, avg: " + (lineFormat.avgTime).toFixed(3) + "ms'></span>";
+                                }
+                            }
+
+                            $(this.children[0]).after("<span class='coverage-hit-counter " + gutterClass + "' style='" + gutterStyle + "' value='" + gutterContent + "'></span>" + timingStr);
+                        });
+
+                        $('#header').on('click', 'a.dir', function (e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            window.location = $(e.target).attr("href") + window.location.hash;
+                        });
+
+                        var scriptLinks = [];
+                        $('#editor').on('click', "span.ace_function[callType=this]", function (e) {
+                            var scriptName = $(e.target).attr("name"), scriptLC = scriptName.toLowerCase();
+                            var found = scriptLinks.some(function (x) {
+                                if (x.name.toLowerCase() === scriptLC) {
+                                    window.location = x.path + ".Script.html" + window.location.hash;
+                                    return true;
+                                }
+                            });
+                        });
+                    });
+
+                </script>
+            </div>
+        </div>
+        <div id='footer'>
+            Foot
+        </div>
+    </div>
+</body>
+<script>
+    function getSpans(staticOrArray, start, end) {
+        if (start >= end) {
+            return [];
+        }
+
+        let spans = [];
+        let index = 0;
+
+        for (let span of staticOrArray) {
+            let spanStart = index,
+                spanLen = span.value.length,
+                spanEnd = index + spanLen;
+
+            index += spanLen;
+
+            if (spanStart >= end) break;
+            if (spanEnd <= start) continue;
+
+            var realStart = Math.max(spanStart, start) - spanStart;
+            var realEnd = Math.min(spanEnd, end) - spanStart;
+
+            // need to trim front and/or back.
+            spans.push({ value: span.value.substring(realStart, realEnd), p: span.p === null ? null : span.p + realStart })
+        }
+        return spans;
+    }
+</script>
+
+</html>

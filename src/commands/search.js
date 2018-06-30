@@ -6,7 +6,7 @@ var Module = require("../module"),
     parseUtils = require("../parseutils"),
     fixSQLCase = require("../instrument/sqlcase");
 
-const header = "// Some SQL statements automatically fixed by osperf... \r\n";
+const header = "// Some SQL statements automatically fixed by osperf...";
 
 function search(modules, options) {
     "use strict";
@@ -33,36 +33,10 @@ function search(modules, options) {
 
 function processFiles(srcFiles, params) {
     "use strict";
-    return Q.nfcall(
-        async.mapLimit,
-        srcFiles,
-        4,
-        processEach.bind(null, params)
-    ).then(combine);
+    return Q.nfcall(async.mapLimit, srcFiles, 4, processEach.bind(null, params)).then(combine);
 }
 
-function stringifyJSON(node, noLocFilter) {
-    var seen = [];
-    return JSON.stringify(
-        node,
-        function(key, val) {
-            if (!noLocFilter && ["loc", "range"].indexOf(key) >= 0) {
-                return;
-            } else if (["std", "lbp", "scope", "led"].indexOf(key) >= 0) {
-                return;
-            }
-
-            if (val != null && typeof val == "object") {
-                if (seen.indexOf(val) >= 0) {
-                    return "<seen>";
-                }
-                seen.push(val);
-            }
-            return val;
-        },
-        4
-    );
-}
+const queryRe = /(prgctx\.exec|dbconnect\.exec|capi\.execn?|\.execsql|\.query)\s*\(/gi;
 
 function processEach(params, file, done) {
     // console.log( "Reading file: ", file );
@@ -76,7 +50,7 @@ function processEach(params, file, done) {
 
             parseUtils.addSource(ast, src);
 
-            if (src.toLowerCase().indexOf(".execsql(") < 0) {
+            if (src.search(queryRe) < 0) {
                 done(null, { result: [] });
                 return;
             }
@@ -84,11 +58,15 @@ function processEach(params, file, done) {
             const result = fixSQLCase(src, ast, file);
 
             if (result.newSource) {
-                if (result.newSource.substring(0, header.length) !== header) {
-                    result.newSource = header + result.newSource;
-                }
+                if (/.*\.html/i.test(file)) {
+                    console.log("### changes in a webscript HTML file are needed...", file);
+                } else {
+                    if (result.newSource.substring(0, header.length) !== header) {
+                        result.newSource = header + "\n" + result.newSource;
+                    }
 
-                fs.writeFileSync(file, result.newSource, "utf8");
+                    fs.writeFileSync(file, result.newSource, "utf8");
+                }
             }
 
             // just return the block & function data.
@@ -96,12 +74,7 @@ function processEach(params, file, done) {
         })
         .catch(function(e) {
             // don't kill the whole process.
-            console.error(
-                "Problem instrumenting file. ",
-                e,
-                " in file: ",
-                file
-            );
+            console.error("Problem instrumenting file. ", e, " in file: ", file);
             done(null, {});
         })
         .done();
@@ -126,9 +99,7 @@ function combine(results) {
         }
     }
 
-    Object.keys(stats).forEach(s =>
-        console.log(`${_.padEnd(s, 20, " ")} = ${stats[s]}`)
-    );
+    Object.keys(stats).forEach(s => console.log(`${_.padEnd(s, 20, " ")} = ${stats[s]}`));
 
     return [];
 }

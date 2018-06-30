@@ -17,10 +17,7 @@ const rules = [
     [{ type: "statement", variant: "compound" }, ["statement", "compound"]],
     [{ type: "compound" }, ["statement"]],
     [{ type: "function" }, ["args"]],
-    [
-        { type: "identifier", format: "table", variant: "expression" },
-        ["target", "columns"]
-    ],
+    [{ type: "identifier", format: "table", variant: "expression" }, ["target", "columns"]],
     [{ type: "assignment" }, ["target", "value"]],
     [{ type: "expression", format: "binary" }, ["left", "right"]],
     [{ type: "expression", format: "unary" }, ["expression"]],
@@ -115,9 +112,7 @@ class Scope {
         if (entry) {
             return entry;
         }
-        return this.parent && searchParent !== false
-            ? this.parent.resolveTable(name)
-            : null;
+        return this.parent && searchParent !== false ? this.parent.resolveTable(name) : null;
     }
 
     getColumns(searchParent) {
@@ -132,7 +127,7 @@ class Scope {
         return result;
     }
 
-    findColName(lowerName) {
+    findColName(lowerName, name) {
         let result;
 
         this.tables.find(t => {
@@ -143,7 +138,14 @@ class Scope {
         if (result) {
             return result;
         }
-        return this.parent ? this.parent.findColName(lowerName) : null;
+        if (this.parent) {
+            return this.parent.findColName(lowerName, name);
+        }
+        // last effort...
+        if (["sysdate", "rownum"].indexOf(lowerName) !== -1) {
+            return name;
+        }
+        return null;
     }
 
     // given a column identifier, finds the table it belongs to and
@@ -154,9 +156,7 @@ class Scope {
         // separate the table reference, if present.
         // Allow '.' in table name in case the table reference is like:
         // INFORMATION_SCHEMA.COLUMNS....
-        let match = /^(?:([._a-zA-Z0-9]+)\.)?((?:\[?[_a-zA-Z0-9]+\]?)|\*)$/.exec(
-            name
-        );
+        let match = /^(?:([._a-zA-Z0-9]+)\.)?((?:\[?[_a-zA-Z0-9]+\]?)|\*)$/.exec(name);
 
         if (!match) {
             console.log("   SQL Parser: failed to parse column name");
@@ -179,14 +179,19 @@ class Scope {
                     return cols.length > 0 ? cols : null;
                 }
 
-                let col = tableResult.columns.find(
-                    c => c.toLowerCase() === colName.toLowerCase()
-                );
+                let col = tableResult.columns.find(c => c.toLowerCase() === colName.toLowerCase());
 
                 if (col) {
                     return `${tableResult.ref}.${col}`;
                 }
             }
+
+            // check for common oracle constructs ...
+            if (colName.toLowerCase() === "nextval") {
+                // return the whole thing...
+                return name;
+            }
+
             return null;
         }
 
@@ -196,7 +201,7 @@ class Scope {
         }
 
         // try to resolve column against all tables in scope...
-        return this.findColName(colName.toLowerCase(), searchParent);
+        return this.findColName(colName.toLowerCase(), colName);
     }
 }
 
@@ -221,20 +226,13 @@ const getColumnsFromSelect = (scope, node) => {
                     } else if (col) {
                         cols.push(col);
                     } else {
-                        console.log(
-                            `   SQL Parser: ${
-                                r.name
-                            } didn't resolve to any column(s)`
-                        );
+                        console.log(`   SQL Parser: ${r.name} didn't resolve to any column(s)`);
                     }
                 } else if (r.alias) {
                     // whatever this is is okay if it has an alias.
                     cols.push(r.alias);
                 } else {
-                    console.log(
-                        "   SQL Parser: Found something else: ",
-                        JSON.stringify(r)
-                    );
+                    console.log("   SQL Parser: Found something else: ", JSON.stringify(r));
                 }
             });
         }
@@ -245,22 +243,16 @@ const getColumnsFromSelect = (scope, node) => {
 };
 
 const isTableOrColumn = n =>
-    n.type === "identifier" &&
-    (n.variant === "table" || n.variant === "column");
+    n.type === "identifier" && (n.variant === "table" || n.variant === "column");
 
 module.exports = function fix(q, verbose) {
-    let tree;
-
-    try {
-        tree = parser(q);
-    } catch (e) {
-        console.error(" SQL Parser: ", e);
-        return null;
-    }
+    let tree = parser(q);
 
     let subSelectIndex = 1;
     let scope = null;
     const nodeStack = [];
+
+    let warnings = [];
 
     const editList = new Edits(q);
 
@@ -273,6 +265,10 @@ module.exports = function fix(q, verbose) {
             const pNode = nodeStack[nodeStack.length - 1];
 
             return (
+                (pNode.type === "statement" &&
+                    pNode.variant === "select" &&
+                    pNode.from &&
+                    pNode.from === n) ||
                 pNode.type === "map" ||
                 pNode.type === "join" ||
                 pNode.type === "compound" ||
@@ -347,7 +343,7 @@ module.exports = function fix(q, verbose) {
                     replaceNodeText(n, tblName);
                     // console.log(`-----------------------------------------`);
                 } else if (tblName === null) {
-                    console.log("   SQL Parser: *** Unknown table: ", n.name);
+                    warnings.push("Unknown table: " + n.name);
                 }
 
                 scope.addTable(n.name, n.alias, getTableCols(n.name));
@@ -362,7 +358,7 @@ module.exports = function fix(q, verbose) {
                     // console.log(  `> ${n.name} should be ${JSON.stringify(colName)}` );
                     replaceNodeText(n, colName);
                 } else if (colName === null) {
-                    console.log("   SQL Parser: *** Unknown column: ", n.name);
+                    warnings.push("Unknown column: " + n.name);
                 }
             }
             return;
@@ -382,7 +378,7 @@ module.exports = function fix(q, verbose) {
         console.log(JSON.stringify(tree, null, 2));
     }
 
-    return editList.apply();
+    return { result: editList.apply(), warnings: warnings };
 };
 
 var getTableName = tbl => {

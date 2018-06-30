@@ -24,6 +24,10 @@ exports.listScriptsInModules = function(modules) {
     });
 };
 
+const parseOptions = {
+    additional_types: ["GUID"]
+};
+
 exports.parseFile = function(filename) {
     return Q.nfcall(fs.readFile, filename, "utf-8").then(function(content) {
         if (_.endsWith(filename.toLowerCase(), ".html")) {
@@ -31,13 +35,12 @@ exports.parseFile = function(filename) {
             content = htmlContent[0].join("\n");
         }
 
-        parser = Bannockburn.Parser();
+        parser = Bannockburn.Parser(parseOptions);
         var ast = parser.parse(content);
 
         return {
             src: parser.getSource(),
-            ast: ast,
-            comments: parser.getComments()
+            ast: ast
         };
     });
 };
@@ -58,6 +61,14 @@ exports.addSource = function(ast, code) {
         if (!node) {
             return;
         }
+
+        // remove artifacts from the (very strange) parser.
+        delete node.led;
+        delete node.nud;
+        delete node.scope;
+        delete node.parent;
+        delete node.labels;
+        delete node.std;
 
         if (node.range) {
             node.code = code.substring(node.range[0], node.range[1] + 1);

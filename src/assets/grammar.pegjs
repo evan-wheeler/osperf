@@ -794,6 +794,7 @@ stmt_nodes
   / stmt_savepoint
   / stmt_release
   / stmt_sqlite
+  / stmt_truncate
 
 /**
  * @note
@@ -1244,11 +1245,19 @@ select_parts_core
   }
 
 select_core_select "SELECT Results Clause"
-  = SELECT o d:( select_modifier )? o t:( select_target )
+  = SELECT o n:(select_top)? d:( select_modifier )? o t:( select_target )
   {
     return Object.assign({
       'result': t
-    }, d);
+    }, n, d);
+  }
+
+select_top "SELECT Top clause"
+  = TOP o n:(literal_number_signed) o 
+  {
+    return {
+      'top' : n
+    };
   }
 
 select_modifier "SELECT Results Modifier"
@@ -1762,6 +1771,16 @@ delete_start "DELETE Keyword"
 
 delete_from "DELETE From"
   = s:( FROM ) o
+
+stmt_truncate "TRUNCATE TABLE Statement"
+  = s:( TRUNCATE ) o t:(TABLE) o id:( id_table )
+  {
+    return Object.assign({
+      'type': 'statement',
+      "variant": keyNode(s),
+      'name': id
+    }, s, t );
+  }
 
 /**
  * @note
@@ -3205,10 +3224,14 @@ THEN
   = "THEN"i !name_char
 TO
   = "TO"i !name_char
+TOP
+  = "TOP"i !name_char
 TRANSACTION
   = "TRANSACTION"i !name_char
 TRIGGER
   = "TRIGGER"i !name_char
+TRUNCATE
+  = "TRUNCATE"i !name_char
 UNION
   = "UNION"i !name_char
 UNIQUE

@@ -1,113 +1,52 @@
 const cmp = require("../compare"),
     cfg = require("../instrument/cfg"),
     fixQuery = require("../query"),
-    getStaticStr = require("../staticval"),
+    getStaticStr = require("../staticval").getStaticStr,
     Bannockburn = require("bannockburn"),
-    _ = require("lodash"),
     path = require("path"),
     StaticEmptyStr = require("../statics").StaticEmptyStr;
 
-var globalVar = {
-    value: "$",
-    arity: "unary",
-    argument: {
-        arity: "literal",
-        decl: false
-    },
-    type: "UnaryExpression",
-    operator: "$",
-    prefix: true
-};
+const { getNode, getNodeProp } = require("../nodeutil");
 
-var singleVar = {
-    arity: "name",
-    decl: true
-};
+const getQueryStmt = node => {
+    const n = getNode(node);
 
-var anyPrgCtx = {
-    value: ".",
-    arity: "binary",
-    object: {
-        value: ".",
-        arity: "binary",
-        object: {},
-        property: {
-            value: "fDBConnect",
-            arity: "literal"
-        },
-        type: "MemberExpression"
-    },
-    property: {
-        value: "fConnection",
-        arity: "literal"
-    },
-    type: "MemberExpression"
-};
-
-var anyDbConnect = {
-    object: {
-        arity: "name"
-    },
-    property: {
-        value: "fConnection",
-        arity: "literal"
-    },
-    type: "MemberExpression"
-};
-
-var dtTable = {
-    value: "$",
-    arity: "unary",
-    argument: {
-        value: "DT_TABLE",
-        arity: "literal"
-    },
-    type: "UnaryExpression",
-    operator: "$",
-    prefix: true
-};
-
-var execSQL = {
-    callee: [
-        {
-            type: "MemberExpression",
-            property: {
-                value: "ExecSQL"
-            }
-        }
-    ]
-};
-
-var varInit = {
-    type: "VariableDeclarator",
-    init: {
-        value: "select * from dtree",
-        arity: "literal"
-    },
-    dataType: {
-        value: "String",
-        arity: "name"
+    if (!n || !n.callee) {
+        return null;
     }
+
+    const callee = getNodeProp(n, "callee");
+
+    if (!callee || callee.type !== "MemberExpression") {
+        return null;
+    }
+
+    const propertyVal = (getNodeProp(callee, "property", "value") || "").toLowerCase();
+    const objVal = (getNodeProp(callee, "object", "value") || "").toLowerCase();
+
+    if (objVal === "capi" && n.arguments && n.arguments.length > 1) {
+        if (propertyVal === "exec") {
+            return { type: "CAPI.Exec", statement: n.arguments[1] };
+        } else if (propertyVal === "execn") {
+            return { type: "CAPI.ExecN", statement: n.arguments[1] };
+        }
+        return null;
+    }
+
+    if (
+        (propertyVal === "execsql" || propertyVal === "query") &&
+        n.arguments &&
+        n.arguments.length > 1
+    ) {
+        // same semantics -- just use execsql
+        return { type: "ExecSQL", statement: n.arguments[1] };
+    } else if (propertyVal === "exec" && objVal && n.arguments && n.arguments.length > 0) {
+        // prgCtx and dbConnect both have an exec function...
+        return { type: "Exec", statement: n.arguments[0] };
+    }
+
+    return null;
 };
-
-var assignment = {
-    arity: "binary",
-    left: {
-        arity: "name"
-    },
-    right: {
-        arity: "literal"
-    },
-    type: "AssignmentExpression",
-    operator: "="
-};
-
-var countNotStatic = 0,
-    countStatic = 0,
-    countFixed = 0,
-    countGood = 0;
-
-var unsolvable = {};
 
 const overlaps = (r1, r2) => {
     return !(r1.start >= r2.end || r1.end <= r2.start);
@@ -122,24 +61,37 @@ const mergeReplacements = (existing, cur) => {
 
         if (matches.length > 0) {
             // ensure same match/same replacement --
-            const badmatch = matches.find(
-                e =>
-                    e.start !== r.start ||
-                    e.end !== r.end ||
-                    e.value !== r.value
-            );
+            let badmatch = false;
+
+            matches.find(e => {
+                if (e.start === r.start && e.end === r.end && e.value === r.value) {
+                    dup = true;
+                    return true;
+                }
+
+                // find the overlapping portions...
+                const eStart = e.start < r.start ? r.start : e.start,
+                    eEnd = e.end > r.end ? r.end : e.end,
+                    rStart = r.start < e.start ? e.start : r.start,
+                    rEnd = r.end > e.end ? e.end : r.end;
+
+                if (e.value.substring(eStart, eEnd) !== r.value.substring(rStart, rEnd)) {
+                    badMatch = true;
+                    return true;
+                }
+            });
 
             if (badmatch) {
-                throw new error({
-                    message: "Bad replacement",
-                    existing: r,
-                    bad: badmatch
-                });
+                throw new Error(
+                    `Bad replacement - Existing = ${JSON.stringify(r)}, Bad: ${JSON.stringify(
+                        badmatch
+                    )}`
+                );
             }
-            dup = true;
         }
 
         if (!dup) {
+            // This algorithm doesn't remove all overlap between replacements.
             additions.push(r);
         }
     });
@@ -203,6 +155,13 @@ const asURL = f => {
     return `${f}`;
 };
 
+const NoCheckDirective = node => {
+    return (
+        node.annotation &&
+        (node.annotation.tag === "sqlnocheck" || node.annotation.tag === "nosqlcheck")
+    );
+};
+
 module.exports = function fixSQLCase(src, ast, file) {
     console.log(asURL(file));
 
@@ -234,39 +193,51 @@ module.exports = function fixSQLCase(src, ast, file) {
 
     const fixit = (staticVal, type) => {
         if (typeof staticVal !== "object") {
-            throw new error({ message: "wrong type", value: staticVal });
+            throw new Error(`wrong type ${staticVal}`);
         }
 
         stats.attempts++;
 
         let q = staticVal.value;
 
-        const fixed = fixQuery(q);
+        try {
+            const { result, warnings } = fixQuery(q);
 
-        if (fixed === null) {
-            console.log(`   Error parsing ${type}:`, q);
-            stats.errors++;
-            return null;
-        } else if (fixed !== q) {
-            console.log(`   Fixed ${type}:`, fixed);
-            stats.fixed++;
-        } else {
-            // console.log(`   Good ${type}:`, q);
+            if (result !== q) {
+                if (warnings.length) {
+                    console.log(`   Warnings and corrections ${type}:`, result);
+                    console.log("          Warnings: ", warnings);
+                } else {
+                    console.log(`   Fixed ${type}:`, result);
+                }
+                stats.fixed++;
+                replacements = mergeReplacements(replacements, staticVal.replace(result));
+                return true;
+            }
+
+            if (warnings.length) {
+                console.log(`      ---> Warnings only ${type}:`, q);
+                console.log("          Warnings: ", warnings);
+            } else {
+                console.log(`      ---> Good ${type}:`, q);
+            }
+
             stats.good++;
-            return false;
+        } catch (e) {
+            // parse error ...
+            console.log("      # Could not parse: ", q);
+            return null;
         }
 
-        // merge in replacements...
-        replacements = mergeReplacements(
-            replacements,
-            staticVal.replace(fixed)
-        );
-
-        // fixed
-        return true;
+        // fine, but not corrected
+        return false;
     };
 
     w.on("FunctionDeclaration", function(node) {
+        if (NoCheckDirective(node)) {
+            return false;
+        }
+
         curFunction = node.name;
         emitDecl = false;
         lastFn = node;
@@ -279,47 +250,69 @@ module.exports = function fixSQLCase(src, ast, file) {
     });
 
     w.on("CallExpression", function(node) {
-        var nodeCode = src.substring(node.range[0], node.range[1] + 1);
+        if (NoCheckDirective(node)) {
+            return false;
+        }
 
-        if (cmp(node, execSQL)) {
+        const qInfo = getQueryStmt(node);
+
+        if (qInfo !== null) {
+            var nodeCode = src.substring(node.range[0], node.range[1] + 1);
+
+            console.log("    > ", nodeCode);
+
             stats.statements++;
 
-            var arg = node.arguments[1];
-            var staticVal = getStaticStr(arg, {});
+            // arg is the sql statement argument.
+            var arg = qInfo.statement;
+
+            // try to compute the argument statically without knowing
+            // possible values of variables.
+
+            let staticVal = getStaticStr(arg, {});
 
             if (staticVal !== null) {
                 stats.static++;
-                fixit(staticVal, "(static)");
-                return;
+                const f = fixit(staticVal, "(static)");
+
+                if (f === true || f === false) {
+                    return;
+                }
             }
 
-            if (lastFn && arg.arity === "name") {
-                // in a function and the statement argument is a variable.
-                let varName = arg.value.toLowerCase();
-
+            if (lastFn) {
                 if (!curCFG) {
                     curCFG = new cfg();
                     curCFG.build(lastFn);
                 }
 
-                // First check simple cases: Single assignment / same block assignments
+                if (arg.arity === "name") {
+                    // in a function and the statement argument is a variable.
+                    let varName = arg.value.toLowerCase();
 
-                let variable = checkSingleAssignment(varName, curCFG);
+                    // First check simple cases: Single assignment / same block assignments
+                    let variable = checkSingleAssignment(varName, curCFG);
 
-                if (variable !== null && variable.value !== "") {
-                    stats.static++;
-                    stats.singleAssign++;
-                    fixit(variable, "(single assign)");
-                    return;
-                }
+                    if (variable !== null && variable.value !== "") {
+                        stats.static++;
+                        stats.singleAssign++;
+                        const f = fixit(variable, "(single assign)");
 
-                variable = checkBlockAssign(varName, arg, curCFG);
+                        if (f === true || f === false) {
+                            return;
+                        }
+                    }
 
-                if (variable !== null) {
-                    stats.static++;
-                    stats.blockAssign++;
-                    fixit(variable, "(same block)");
-                    return;
+                    variable = checkBlockAssign(varName, arg, curCFG);
+
+                    if (variable !== null) {
+                        stats.static++;
+                        stats.blockAssign++;
+                        const f = fixit(variable, "(same block)");
+                        if (f === true || f === false) {
+                            return;
+                        }
+                    }
                 }
 
                 // perform harder checks...
@@ -333,11 +326,14 @@ module.exports = function fixSQLCase(src, ast, file) {
 
                 codePaths.forEach(p => {
                     const curVars = curCFG.traceVarsTo(p, arg);
-                    const result = curVars[varName];
-                    if (result) {
-                        const v = result.value;
+
+                    // try to compute the expression statically, with variables.
+                    staticVal = getStaticStr(arg, curVars);
+
+                    if (staticVal) {
+                        const v = staticVal.value;
                         if (v !== "" && !keys.hasOwnProperty(v)) {
-                            possibleVars.push(result);
+                            possibleVars.push(staticVal);
                             keys[v] = true;
                         }
                     } else {
@@ -363,8 +359,9 @@ module.exports = function fixSQLCase(src, ast, file) {
             }
 
             stats.unsolved++;
-            console.log("   #### UNSOLVED: ", nodeCode);
-            console.log(`       Link: "${asURL(file)}:${node.loc.start.line}"`);
+            console.log(
+                `           #### NO SOLUTIONS ####: "${asURL(file)}:${node.loc.start.line}"`
+            );
         }
     });
 

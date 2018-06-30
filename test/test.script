@@ -1,34 +1,23 @@
-function test() 
-    String firstPart, stmt
-    string which = $WhichDB
+// Some SQL statements automatically fixed by osperf... 
+Function Assoc GetExporterInfo( Object prgCtx = .GetAdminCtx().prgCtx )
 
-    switch( which ) 
-        case "HANA", "Oracle"
-           firstPart = "select name, dataid from dtree where exists "
-        end
-        case "MSSQL"
-            firstPart = "select NAME, DATAID from dtree where exists "
-        end
-        case "SQLite"
-            firstpart = "select NAME, DATAID, parentid from dtreecore where exists "
-        end
-    end
-
-    Integer i
-    for i = 1 to 100
-        firstpart += " " 
-    end
-
-    if( $SyntergyCore.SQLUtils.IsOracle() ) 
-        stmt += "select dataid, Ownerid From " + $DT_TABLE + " where Dataid = :A1" 
-    else
-        stmt += "select DaTaId, ownerid, " + \
-            "userid, name From " + \
-                $DT_TABLE + " where " + \
-                "dataID = :A1 order by parentiD desc" 
-    end
-
-    String realStmt = firstPart + "(" + stmt + ") order by extendeddata"
-
-    .ExecSQL( prgCtx, realStmt, {} )
-end
+	String sql
+	Integer maxJobIDs = 10
+	
+	// Find some recent export jobs that have a job ID.
+	
+	if $SyntergyCore.SQLUtils.IsOracle() 
+		sql = "select job_id from ( " + \
+					"select distinct job_id from ( " + \
+						"select distinct JOB_ID job_id, EXPORT_ID from REPL_EXPORT_HISTORY where JOB_ID in ( select JOB_ID from SYN_JOB ) order by EXPORT_ID desc " + \
+					") order by job_id desc " + \
+			 	") where rownum <= %1"
+	else
+		// sql = "select distinct top %1 job_id from (select top 500 job_id, export_id from ( select h.job_id job_id, h.export_id export_id from repl_export_history h, syn_job j where h.job_id=j.job_id ) a order by export_id desc ) x order by x.job_id desc"
+	end
+	
+	// set the max number to retrieve	
+	sql = Str.Format( sql, maxJobIDs )
+	
+	RecArray jobResults = .ExecSQL( prgCtx, sql )	
+End

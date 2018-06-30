@@ -18,6 +18,13 @@
         {
             "type": "node",
             "request": "launch",
+            "name": "Launch Search ContentSentry",
+            "program": "${workspaceRoot}\\index.js",
+            "args": ["search", "ContentSentry"]
+        },
+        {
+            "type": "node",
+            "request": "launch",
             "name": "Launch Unused",
             "program": "${workspaceRoot}\\index.js",
             "args": ["unused", "replicator"]

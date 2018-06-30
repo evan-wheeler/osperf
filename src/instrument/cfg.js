@@ -1,7 +1,7 @@
-var _ = require("lodash"),
+const _ = require("lodash"),
     walk = require("../walk"),
     cmp = require("../compare"),
-    getStaticStr = require("../staticval");
+    { getStaticStr, getStaticList } = require("../staticval");
 
 class Builder {
     constructor(cfg, current) {
@@ -125,10 +125,15 @@ class Builder {
             case "SwitchStatement":
                 return this.switchStmt(s);
             case "ForInStatement":
+                return this.forInStmt(s);
             case "ForStatement":
-                return this.forStmt(s);
             case "ForCStyleStatement":
-                return this.forCStyle(s);
+                return this.forStmt(s);
+            case "WhileStatement":
+                return this.whileStmt(s);
+            case "RepeatStatement":
+                return this.repeatStmt(s);
+
             default:
                 this.add(s);
         }
@@ -160,38 +165,65 @@ class Builder {
         }
     }
 
-    forStmt(s) {
-        this.stmt(s.first);
+    pushTargets(t) {
+        this.targets = Object.assign.apply({}, [t, { tail: this.targets }]);
+    }
 
-        // for x in {...} doesn't use second and third.
-        if (!_.isNil(s.second)) {
-            this.stmt(s.second);
-        }
-        if (!_.isNil(s.third)) {
-            this.stmt(s.third);
-        }
+    popTargets() {
+        this.targets = this.targets.tail;
+    }
 
-        var loop = this.newBlock("for.loop");
+    forInUnrolled(varNode, staticList, rangeNode) {
+        var start = this.current;
+        var done = this.newBlock("unroll.done");
+
+        staticList.forEach(staticVal => {
+            var block = this.newBlock("loop.value");
+            this.jump(block);
+            this.current = block;
+            this.add(
+                makeAssignment(varNode, staticVal, { range: rangeNode.range, loc: rangeNode.loc })
+            );
+            this.jump(done);
+            this.current = start;
+        });
+
+        this.current = done;
+    }
+
+    forInStmt(s) {
+        var loop = this.newBlock("forin.loop");
         this.jump(loop);
         this.current = loop;
 
-        var body = this.newBlock("for.body");
-        var done = this.newBlock("for.done");
+        const forInExpr = getNode(s.first);
+        const varNode = getNode(forInExpr.left);
+        const listNode = getNode(forInExpr.right);
+        const list = getStaticList(listNode);
+
+        if (list !== null) {
+            // we can unroll the loop...
+            this.forInUnrolled(varNode, list, forInExpr);
+        } else {
+            // not fully static --
+            this.add(s.first);
+        }
+
+        var body = this.newBlock("forin.body");
+        var done = this.newBlock("forin.done");
+
         this.ifelse(body, done);
         this.current = body;
 
-        this.targets = {
-            tail: this.targets,
-            _break: done,
-            _continue: loop
-        };
+        this.pushTargets({ _break: done, _continue: loop });
         this.stmt(s.body);
-        this.targets = this.targets.tail;
+        this.popTargets();
+
         this.jump(loop); // back-edge
         this.current = done;
     }
 
-    forCStyle(s) {
+    forStmt(s) {
         if (!_.isNil(s.first)) {
             this.stmt(s.first);
         }
@@ -214,13 +246,11 @@ class Builder {
             this.ifelse(body, done);
             this.current = body;
         }
-        this.targets = {
-            tail: this.targets,
-            _break: done,
-            _continue: cont
-        };
+
+        this.pushTargets({ _break: done, _continue: cont });
         this.stmt(s.body);
-        this.targets = this.targets.tail;
+        this.popTargets();
+
         this.jump(cont);
 
         if (!_.isNil(s.third)) {
@@ -231,10 +261,51 @@ class Builder {
         this.current = done;
     }
 
+    whileStmt(s) {
+        let body = this.newBlock("while.body");
+        let done = this.newBlock("while.done"); // target of 'break'
+        let loop = this.newBlock("while.loop");
+        let cont = loop; // target of 'continue'
+        this.jump(loop);
+        this.current = loop;
+
+        this.add(s.test);
+        this.ifelse(body, done);
+        this.current = body;
+
+        this.pushTargets({ _break: done, _continue: cont });
+        this.stmt(s.body);
+        this.popTargets();
+
+        this.jump(cont);
+        this.current = done;
+    }
+
+    repeatStmt(s) {
+        let body = this.newBlock("repeat.body");
+        let done = this.newBlock("repeat.done"); // target of 'break'
+        let loop = this.newBlock("repeat.loop"); // (test) target of continue
+        let cont = loop; // target of 'continue'
+
+        this.current = body;
+
+        this.pushTargets({ _break: done, _continue: cont });
+        this.stmt(s.body);
+        this.popTargets();
+
+        this.jump(loop);
+        this.current = loop;
+
+        this.add(s.test);
+        this.ifelse(body, done);
+
+        this.current = done;
+    }
+
     // labeledBlock returns the branch target associated with the
     // specified label, creating it if needed.
     labeledBlock(label) {
-        var lb = this.lblocks[label];
+        let lb = this.lblocks[label];
         if (_.isNil(lb)) {
             lb = { _goto: this.newBlock(label) };
             if (_.isNil(this.lblocks)) {
@@ -310,7 +381,7 @@ class CFG {
     }
 
     findPaths() {
-        if (this.blocks.length > 50) {
+        if (this.blocks.length > 105) {
             console.error("********** TOO MANY BLOCKS ****************");
             console.error(this.blocks.length);
             console.error("*******************************************");
@@ -329,9 +400,7 @@ class CFG {
         const walkTree = (chain, node) => {
             let nextNodes = [];
             if (node.succs) {
-                nextNodes = node.succs.filter(
-                    s => chain.indexOf(s.index) === -1
-                );
+                nextNodes = node.succs.filter(s => chain.indexOf(s.index) === -1);
                 nextNodes.forEach(n => walkTree([...chain, node.index], n));
             }
 
@@ -347,6 +416,22 @@ class CFG {
 
         return paths.map(p => p.map(nIndex => indexMap[nIndex]));
     }
+
+    /*
+    addComputationBranches(paths) {
+        let rtn = [];
+        paths.map(p => this.computeBranches(p)).reduce((p, c) => [].push.apply(p, c), rtn);
+        return rtn;
+    }
+
+    computeBranches(path) {
+        // As long as we use existing tokens, we can add additional
+        // paths through modified blocks to simulate different code paths
+        // through loops and ternary expressions.
+
+        return [path];
+    }
+    */
 
     printPaths(code) {
         this.findPaths().forEach(path => {
@@ -421,9 +506,7 @@ class Block {
     }
 
     get code() {
-        return this.nodes.length
-            ? this.nodes.map(v => v.code || "").join("\n")
-            : "";
+        return this.nodes.length ? this.nodes.map(v => v.code || "").join("\n") : "";
     }
 
     traceVars(varsIn, maxStartRange, assignFirst) {
@@ -451,10 +534,7 @@ class Block {
                         if (assignFirst && _.isNull(varsOut[varName])) {
                             // not allowed...
                             varsOut[varName] = null;
-                        } else if (
-                            varsOut.hasOwnProperty(varName) &&
-                            varsOut[varName] !== null
-                        ) {
+                        } else if (varsOut.hasOwnProperty(varName) && varsOut[varName] !== null) {
                             varsOut[varName] = varsOut[varName].plus(staticVal);
                         }
                     } else {
@@ -467,15 +547,8 @@ class Block {
             } else if (isDeclr(n)) {
                 let varName = getNode(n.name).value.toLowerCase();
 
-                if (
-                    varsIn.hasOwnProperty(varName) &&
-                    varsIn[varName].value !== ""
-                ) {
-                    console.log(
-                        "shadowed variable ",
-                        varName,
-                        " -- skipping ..."
-                    );
+                if (varsIn.hasOwnProperty(varName) && varsIn[varName].value !== "") {
+                    console.log("shadowed variable ", varName, " -- skipping ...");
                     varsOut[varName] = null;
                     return;
                 }
@@ -521,13 +594,24 @@ var varInit = {
         arity: "name"
     },
     dataType: {
-        value: "String",
         arity: "name"
     }
 };
 
-var assignment = {
-    type: "AssignmentExpression"
+const makeAssignment = (varNode, staticNode, rangeNode) => {
+    return Object.assign(
+        {
+            value: "=",
+            arity: "binary",
+            left: varNode,
+            right: staticNode,
+            assignment: true,
+            type: "AssignmentExpression",
+            operator: "=",
+            id: "="
+        },
+        rangeNode
+    );
 };
 
 function isAssignment(node) {
