@@ -1,23 +1,74 @@
 // Some SQL statements automatically fixed by osperf... 
-Function Assoc GetExporterInfo( Object prgCtx = .GetAdminCtx().prgCtx )
+Function Assoc SetDestinationID( Object prgCtx, \
+								Integer homeServerID, \
+								Integer homeDataID, \
+								Integer destServerID, \
+								Integer destDataID, \
+								String contractType = undefined )
 
-	String sql
-	Integer maxJobIDs = 10
+	/*
+	 * This is usually called when we're importing a row that 
+	 * contains an ID that originated on another system and 
+	 * we are setting the value that will be on this system.
+	 */
+
+	Assoc rtn
+	rtn.ok = true
+	rtn.methodName = "SetDestinationID"
+
+	if prgCtx.fDbConnect.StartTrans()
+
+		String updateSQL = "UPDATE REPL_OBJECT_SERVERS SET SERVER_DATAID =:A1 " + \
+							"WHERE HOME_SERVER_ID=:A2 AND SERVER_ID=:A3 AND DATAID=:A4"
+		
+		List bindVars = { destDataID, homeServerID, destServerID, homeDataID } 	
 	
-	// Find some recent export jobs that have a job ID.
-	
-	if $SyntergyCore.SQLUtils.IsOracle() 
-		sql = "select job_id from ( " + \
-					"select distinct job_id from ( " + \
-						"select distinct JOB_ID job_id, EXPORT_ID from REPL_EXPORT_HISTORY where JOB_ID in ( select JOB_ID from SYN_JOB ) order by EXPORT_ID desc " + \
-					") order by job_id desc " + \
-			 	") where rownum <= %1"
+		if IsDefined( contractType )
+			updateSQL += " and Replication_Type = :A5"
+			bindVars = { @bindVars, contractType }
+		end
+		
+		Integer result = .ExecSQL( prgCtx, updateSQL, bindVars )
+		
+		if IsError( result )
+			.SetErrObj( rtn, result, prgCtx )
+		else
+			rtn.result = result
+		end	
+		
+		// invalidate the import cache.
+		
+		if destServerID == $Replicator.ServerAPI.GetLocalServerID( prgCtx ).result
+			
+			// Other server is the home server
+			
+			// If the contract that we're changing is a C contract, update the cache with the
+			// new ID.
+			
+			.InvalidateMappingCache( homeServerID, homeDataID, contractType == 'C' ? destDataID : undefined )
+						
+			.InvalidateRemoteIDCache( homeServerID, homeDataID )
+			.InvalidateLocalIDCache( destDataID )
+			
+			.AddContractActivityRecord( prgCtx, homeDataID, homeServerID, destServerID, 'U', contractType ) 
+
+		else
+			
+			// The dest server is actually another server. This server
+			// owns the home data ID ... atypical case -- maybe even an error -- 
+			// TODO: Maybe log this out?
+						
+			.InvalidateMappingCache( destServerID, destDataID, homeDataID )
+			.InvalidateRemoteIDCache( destServerID, destDataID )
+			.InvalidateLocalIDCache( homeDataID )
+			
+			.GetLogger().Error( "Possibly setting the server_dataID on the wrong server. Arguments: {}", { Parameters() } )
+		end
+			
+		prgCtx.fDBConnect.EndTrans( rtn.ok )
 	else
-		// sql = "select distinct top %1 job_id from (select top 500 job_id, export_id from ( select h.job_id job_id, h.export_id export_id from repl_export_history h, syn_job j where h.job_id=j.job_id ) a order by export_id desc ) x order by x.job_id desc"
+		.SetErrObj( rtn, "Could not start transaction" )
 	end
 	
-	// set the max number to retrieve	
-	sql = Str.Format( sql, maxJobIDs )
-	
-	RecArray jobResults = .ExecSQL( prgCtx, sql )	
-End
+	return rtn
+end								 

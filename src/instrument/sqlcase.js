@@ -3,7 +3,7 @@ const cmp = require("../compare"),
     fixQuery = require("../query"),
     getStaticStr = require("../staticval").getStaticStr,
     Bannockburn = require("bannockburn"),
-    path = require("path"),
+    FileReport = require("../report").FileReport,
     StaticEmptyStr = require("../statics").StaticEmptyStr;
 
 const { getNode, getNodeProp } = require("../nodeutil");
@@ -34,7 +34,10 @@ const getQueryStmt = node => {
     }
 
     if (
-        (propertyVal === "execsql" || propertyVal === "query") &&
+        (propertyVal === "execsql" ||
+            propertyVal === "query" ||
+            propertyVal === "_findmissingids" ||
+            propertyVal === "exportquery") &&
         n.arguments &&
         n.arguments.length > 1
     ) {
@@ -165,6 +168,8 @@ const NoCheckDirective = node => {
 module.exports = function fixSQLCase(src, ast, file) {
     console.log(asURL(file));
 
+    const report = new FileReport(file);
+
     const stats = {
         statements: 0, // number of statements
         attempts: 0, // number of attempts to fix statements
@@ -184,21 +189,26 @@ module.exports = function fixSQLCase(src, ast, file) {
 
     let w = new Bannockburn.Walker();
 
-    let curScript = path.basename(file).replace(/\.Script$/i, ""),
-        curFunction = "",
-        emitDecl = false,
-        lastFn = null,
+    let lastFn = null,
         curCFG = null,
-        codePaths = null;
+        codePaths = null,
+        stmtHistory = {};
 
     const fixit = (staticVal, type) => {
         if (typeof staticVal !== "object") {
             throw new Error(`wrong type ${staticVal}`);
         }
 
-        stats.attempts++;
+        let q = "" + staticVal.value;
 
-        let q = staticVal.value;
+        let qKey = q;
+
+        if (stmtHistory.hasOwnProperty(qKey)) {
+            console.log("Duplicate");
+            return stmtHistory[qKey];
+        }
+
+        stats.attempts++;
 
         try {
             const { result, warnings } = fixQuery(q);
@@ -207,11 +217,16 @@ module.exports = function fixSQLCase(src, ast, file) {
                 if (warnings.length) {
                     console.log(`   Warnings and corrections ${type}:`, result);
                     console.log("          Warnings: ", warnings);
+                    report.curExec().addWarning(staticVal, warnings);
                 } else {
                     console.log(`   Fixed ${type}:`, result);
+                    report.curExec().addGood(staticVal);
                 }
+
                 stats.fixed++;
                 replacements = mergeReplacements(replacements, staticVal.replace(result));
+                stmtHistory[qKey] = true;
+
                 return true;
             }
 
@@ -220,21 +235,26 @@ module.exports = function fixSQLCase(src, ast, file) {
                 console.log("          Warnings: ", warnings);
             } else {
                 console.log(`      ---> Good ${type}:`, q);
+                report.curExec().addGood(staticVal);
             }
 
             stats.good++;
         } catch (e) {
             // parse error ...
             console.log("      # Could not parse: ", q);
+            stmtHistory[qKey] = null;
+            report.curExec().addError(staticVal, e.message);
             return null;
         }
 
         // fine, but not corrected
+        stmtHistory[qKey] = false;
         return false;
     };
 
     w.on("FunctionDeclaration", function(node) {
         if (NoCheckDirective(node)) {
+            console.log("  Skipping function due to NoSQLCheck");
             return false;
         }
 
@@ -260,11 +280,37 @@ module.exports = function fixSQLCase(src, ast, file) {
             var nodeCode = src.substring(node.range[0], node.range[1] + 1);
 
             console.log("    > ", nodeCode);
+            report.newExec(node);
 
             stats.statements++;
 
             // arg is the sql statement argument.
             var arg = qInfo.statement;
+
+            if (qInfo.type === "ExecSQL") {
+                if (node.arguments.length === 3) {
+                    const bindVals = getNode(node.arguments[2]);
+
+                    if (bindVals.type !== "ListExpression") {
+                        const varName = bindVals.arity === "name" ? bindVals.value : "";
+
+                        if (
+                            [
+                                "bindvars",
+                                "noderecs",
+                                "vals",
+                                "params",
+                                "recs",
+                                "insertrecs",
+                                "args",
+                                "bindvals"
+                            ].indexOf(varName.toLowerCase()) === -1
+                        ) {
+                            console.warn(">>>>>> Might be a problem: ", nodeCode);
+                        }
+                    }
+                }
+            }
 
             // try to compute the argument statically without knowing
             // possible values of variables.
@@ -274,10 +320,7 @@ module.exports = function fixSQLCase(src, ast, file) {
             if (staticVal !== null) {
                 stats.static++;
                 const f = fixit(staticVal, "(static)");
-
-                if (f === true || f === false) {
-                    return;
-                }
+                return;
             }
 
             if (lastFn) {
@@ -368,7 +411,8 @@ module.exports = function fixSQLCase(src, ast, file) {
     w.start(ast);
 
     let rtn = {
-        stats: stats
+        stats,
+        report
     };
 
     // instrument the code.
@@ -381,7 +425,6 @@ module.exports = function fixSQLCase(src, ast, file) {
         replacements.forEach(r => {
             const before = newSrc.substring(0, r.start);
             const after = newSrc.substring(r.end);
-            const existing = src.substring(r.start, r.end);
 
             newSrc = before + r.value + after;
         });

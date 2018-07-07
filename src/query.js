@@ -9,20 +9,24 @@ const rules = [
     [{ type: "statement", variant: "list" }, ["statement"]],
     [
         { type: "statement", variant: "select" },
-        ["from", "result", "where", "group", "having", "order"]
+        ["with", "from", "result", "where", "group", "having", "order"]
     ],
     [{ type: "statement", variant: "insert" }, ["into", "result"]],
     [{ type: "statement", variant: "delete" }, ["from", "where"]],
     [{ type: "statement", variant: "update" }, ["into", "set", "where"]],
     [{ type: "statement", variant: "compound" }, ["statement", "compound"]],
+    [{ type: "statement", variant: "truncate" }, ["name"]],
     [{ type: "compound" }, ["statement"]],
     [{ type: "function" }, ["args"]],
     [{ type: "identifier", format: "table", variant: "expression" }, ["target", "columns"]],
+    [{ type: "expression", format: "table", variant: "common" }, ["expression"]],
     [{ type: "assignment" }, ["target", "value"]],
     [{ type: "expression", format: "binary" }, ["left", "right"]],
     [{ type: "expression", format: "unary" }, ["expression"]],
     [{ type: "expression", variant: "list" }, ["expression"]],
     [{ type: "expression", variant: "order" }, ["expression"]],
+    [{ type: "expression", variant: "case" }, ["expression"]],
+    [{ type: "condition", variant: "when" }, ["condition", "consequent"]],
     [{ type: "map", variant: "join" }, ["source", "map"]],
     [{ type: "map", type: "join" }, ["source", "constraint"]],
     [{ type: "constraint", variant: "join" }, ["on"]],
@@ -61,6 +65,7 @@ class Scope {
 
         // add the columns that are associated with this table.
         columns.forEach(c => {
+            //console.log(`Adding column ${c} for table ${tblAlias}`);
             const colRec = {
                 name: c,
                 lookup: c.toLowerCase(),
@@ -151,21 +156,11 @@ class Scope {
     // given a column identifier, finds the table it belongs to and
     // the correct name of the column.
     resolveColumn(name, searchParent) {
-        let colName, tableRef;
+        const { colName, tableRef } = parseColumn(name);
 
-        // separate the table reference, if present.
-        // Allow '.' in table name in case the table reference is like:
-        // INFORMATION_SCHEMA.COLUMNS....
-        let match = /^(?:([._a-zA-Z0-9]+)\.)?((?:\[?[_a-zA-Z0-9]+\]?)|\*)$/.exec(name);
-
-        if (!match) {
-            console.log("   SQL Parser: failed to parse column name");
+        if (colName === "") {
             return null;
         }
-
-        [, tableRef, colName] = match;
-
-        colName = colName.replace(/[\[\]]/g, "");
 
         // If there is a table reference then lookup the table using that
         // name to identify the column.
@@ -205,6 +200,21 @@ class Scope {
     }
 }
 
+const parseColumn = name => {
+    let match = /^(?:([._a-zA-Z0-9]+)\.)?((?:\[?[_a-zA-Z0-9]+\]?)|\*)$/.exec(name);
+
+    if (!match) {
+        console.log("   SQL Parser: failed to parse column name");
+        return { tableRef: "", colName: "" };
+    }
+
+    let [, tableRef, colName] = match;
+
+    colName = colName.replace(/[\[\]]/g, "");
+
+    return { tableRef, colName };
+};
+
 const getColumnsFromSelect = (scope, node) => {
     let cols = [];
 
@@ -216,6 +226,9 @@ const getColumnsFromSelect = (scope, node) => {
                 if (r.type === "statement" && r.variant === "select") {
                     // sub-select in this position must have alias...
                     cols.push(r.alias);
+                } else if (r.alias) {
+                    // whatever this is is okay if it has an alias.
+                    cols.push(r.alias);
                 } else if (r.type === "identifier") {
                     // should have a name...
                     const col = scope.resolveColumn(r.name, false);
@@ -226,11 +239,10 @@ const getColumnsFromSelect = (scope, node) => {
                     } else if (col) {
                         cols.push(col);
                     } else {
+                        console.log(`   Current columns are: ${scope.getColumns()}`);
+
                         console.log(`   SQL Parser: ${r.name} didn't resolve to any column(s)`);
                     }
-                } else if (r.alias) {
-                    // whatever this is is okay if it has an alias.
-                    cols.push(r.alias);
                 } else {
                     console.log("   SQL Parser: Found something else: ", JSON.stringify(r));
                 }
@@ -254,6 +266,8 @@ module.exports = function fix(q, verbose) {
 
     let warnings = [];
 
+    let CTETables = {};
+
     const editList = new Edits(q);
 
     const replaceNodeText = (node, newStr) => {
@@ -264,7 +278,7 @@ module.exports = function fix(q, verbose) {
         if (nodeStack.length) {
             const pNode = nodeStack[nodeStack.length - 1];
 
-            return (
+            const result =
                 (pNode.type === "statement" &&
                     pNode.variant === "select" &&
                     pNode.from &&
@@ -276,10 +290,24 @@ module.exports = function fix(q, verbose) {
                 (pNode.type === "statement" &&
                     pNode.variant === "select" &&
                     n.type === "statement" &&
-                    n.variant === "compound")
-            );
+                    n.variant === "compound") ||
+                (pNode.type === "expression" && pNode.variant === "common");
+
+            if (result) {
+                return true;
+            }
         }
         return false;
+    };
+
+    const addCTE = n => {
+        const cteName = n.target.target.name;
+        const cteCols = n.target.columns.map(c => c.name);
+
+        if (scope) {
+            scope.addTable(`<cte_${cteName}>`, cteName, cteCols);
+            CTETables[cteName.toLowerCase()] = cteName;
+        }
     };
 
     const leave = n => {
@@ -304,6 +332,8 @@ module.exports = function fix(q, verbose) {
                                 `<subselect${subSelectIndex++}>`,
                                 alias,
                                 hoistCols
+                                    .map(c => parseColumn(c).colName || null)
+                                    .filter(c => c !== null)
                             );
                         }
                     }
@@ -331,11 +361,32 @@ module.exports = function fix(q, verbose) {
             return leave(nodeStack.pop());
         }
 
+        if (n.type === "expression" && n.variant === "common" && n.format === "table") {
+            addCTE(n);
+            nodeStack.push(n);
+            return visit;
+        }
+
         // console.log(` => ${n.type} ${n.variant} ${lbl}`);
 
         if (isTableOrColumn(n)) {
             if (n.variant === "table") {
-                const tblName = getTableName(n.name);
+                let addTbl = true;
+                let tblName = getTableName(n.name);
+                let cols = getTableCols(n.name);
+
+                if (tblName === null) {
+                    if (CTETables.hasOwnProperty(n.name)) {
+                        // CTE tables should be registered in a parent scope.
+                        const cteTbl = scope.resolveTable(n.name, true);
+
+                        if (cteTbl) {
+                            tblName = cteTbl.ref;
+                            addTbl = false;
+                            cols = cteTbl.columns;
+                        }
+                    }
+                }
 
                 if (tblName !== null && tblName !== n.name) {
                     // console.log(`-----------------------------------------`);
@@ -346,7 +397,7 @@ module.exports = function fix(q, verbose) {
                     warnings.push("Unknown table: " + n.name);
                 }
 
-                scope.addTable(n.name, n.alias, getTableCols(n.name));
+                scope.addTable(n.name, n.alias, cols);
             } else if (n.variant === "column") {
                 // we should be able to find a column that is in scope.
 

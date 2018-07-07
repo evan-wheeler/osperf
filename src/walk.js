@@ -62,10 +62,14 @@ function Walk(visitorFn, node, label, nodeChildrenFn) {
     var nodes = nodeToList(node);
 
     // block may contain one or more nodes...
-    nodes.forEach(n => {
+    for (let n of nodes) {
         if (!_.isNil(n)) {
             // visit; allow visitor function to return a new visitorFn.
             var v = visitorFn(n, label);
+
+            if (v === false) {
+                return false;
+            }
 
             if (v) {
                 // walk all child nodes.
@@ -81,7 +85,7 @@ function Walk(visitorFn, node, label, nodeChildrenFn) {
                 v(null, label);
             }
         }
-    });
+    }
 }
 
 module.exports = Walk;

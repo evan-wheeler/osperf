@@ -2,6 +2,14 @@
 # yarn lockfile v1
 
 
+"@types/lodash@^4.14.110":
+  version "4.14.110"
+  resolved "https://registry.yarnpkg.com/@types/lodash/-/lodash-4.14.110.tgz#fb07498f84152947f30ea09d89207ca07123461e"
+
+"@types/node@^10.5.1":
+  version "10.5.1"
+  resolved "https://registry.yarnpkg.com/@types/node/-/node-10.5.1.tgz#d578446f4abff5c0b49ade9b4e5274f6badaadfc"
+
 Base64@~0.2.0:
   version "0.2.1"
   resolved "https://registry.yarnpkg.com/Base64/-/Base64-0.2.1.tgz#ba3a4230708e186705065e66babdd4c35cf60028"
@@ -313,15 +321,9 @@ balanced-match@^1.0.0:
   version "1.0.0"
   resolved "https://registry.yarnpkg.com/balanced-match/-/balanced-match-1.0.0.tgz#89b4d199ab2bee49de164ea02b89ce462d71b767"
 
-"bannockburn@http://github.com/evan-wheeler/bannockburn":
-  version "0.0.17"
-  resolved "http://github.com/evan-wheeler/bannockburn#cedc7c8e823aaf0ff840838dcfaa71876051a646"
-  dependencies:
-    lodash latest
-
 "bannockburn@https://github.com/evan-wheeler/bannockburn.git":
   version "0.0.17"
-  resolved "https://github.com/evan-wheeler/bannockburn.git#5b77f4d91b1c831b231a729ab0b8279f918c08bd"
+  resolved "https://github.com/evan-wheeler/bannockburn.git#3b6dda2cdbeb8715da0de8c7555420be8547e9c8"
   dependencies:
     lodash latest
 
@@ -2029,6 +2031,12 @@ grunt-lib-phantomjs@~0.5.0:
     phantomjs "~1.9.0-1"
     semver "~1.0.14"
     temporary "~0.0.4"
+
+grunt-run@^0.8.1:
+  version "0.8.1"
+  resolved "https://registry.yarnpkg.com/grunt-run/-/grunt-run-0.8.1.tgz#502f988947a59f9ad567e2dcb5eeedec712980ec"
+  dependencies:
+    strip-ansi "^3.0.0"
 
 grunt@~0.4.5:
   version "0.4.5"

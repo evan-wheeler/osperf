@@ -6,21 +6,21 @@ module.exports = {
     Lexer: require("./lib/lexer"),
     preprocessor: require("./lib/preprocessor")
 };
-
+ 
 /*
 var b = module.exports;
 var p = b.Parser();
-p.parse(`
+p.parse(` 
     // tag:name of tag
-    function f()
+    function f() 
         Integer i
         for( i = 0; i < 10; i++)
             // tag:sqlnocheck
             echo( "This is what i equals right now: ", \
                 Str.Format("%1", i ), \
-                " or raw: " + Str.String( i ) \
+                " or raw: " + Str.String( i )  \
                 )
-        end
+        end 
     End
 `);
 */
@@ -1681,7 +1681,7 @@ function makeParser(options) {
         x.nud = function() {
             token_error(this, s + " statement not expected here");
 
-            /* 
+            /*
             scope.reserve(this);
             this.expression = expression(70);
             this.arity = "unary";
@@ -20331,23 +20331,23 @@ var Lexer = Bannockburn.Lexer,
 window.Walker = Walker;
 window.Parser = Parser();
 
-function doLexer(src) { 
+function doLexer(src) {
     'use strict';
-    
+
     var lex = new Lexer();
     var t, tokens;
-    
+
     var beginTime = performance.now();
 
-    for( var i = 0; i < 1; ++i ) { 
+    for( var i = 0; i < 1; ++i ) {
         tokens = [];
         lex.setInput( src );
-        while( ( t = lex.get() ) !== null ) { 
+        while( ( t = lex.get() ) !== null ) {
             tokens.push( t );
-        }    
+        }
     }
     var endTime = performance.now();
-   
+
     document.getElementById( "lexerTime" ).innerHTML = "Tokenize: " + ( ( endTime - beginTime ) / 1.0 ).toFixed( 2 ) + " ms";
 }
 
@@ -20355,12 +20355,12 @@ function tokenText( t ) {
     if( t.type === '(nl)' && !t.value !== ';' ) {
         return "EOL";
     }
-    
+
     return t.value;
 }
 
-function tokenClass( t ) { 
-    if( t.type === '(nl)' ) { 
+function tokenClass( t ) {
+    if( t.type === '(nl)' ) {
         return "nl";
     }
     else if( t.type === "(end)" ) {
@@ -20371,15 +20371,15 @@ function tokenClass( t ) {
 
 function displayLexResults( tokens ) {
     var frag = document.createDocumentFragment();
-    
+
     var wrapNL = $( '#wrapNL' ).prop( 'checked' );
-    
-    tokens.forEach( function( t ) { 
+
+    tokens.forEach( function( t ) {
         var li = document.createElement("li");
         li.className = tokenClass( t );
         li.textContent = tokenText( t );
 
-        $( li ).attr( { 
+        $( li ).attr( {
             "d-row-from": "" + (t.loc.start.line-1), // line is one based -- make zero based row.
             "d-row-to": "" + (t.loc.end.line-1), // line is one based -- make zero based row.
             "d-col-from": t.loc.start.col,
@@ -20387,12 +20387,12 @@ function displayLexResults( tokens ) {
         } );
 
         frag.appendChild(li);
-        
-        if( wrapNL && t.type === '(nl)' && t.value !== ';' ) { 
+
+        if( wrapNL && t.type === '(nl)' && t.value !== ';' ) {
             frag.appendChild( document.createElement( 'br' ) );
         }
     } );
-    
+
     $( '#tokens ul' ).html( frag );
 }
 
@@ -20401,9 +20401,9 @@ function go(source) {
     var beginTime = 0, endTime = 0;
 
     doLexer(source);
-    
+
     var parser = Parser();
-    
+
     try {
         beginTime = performance.now();
         tree = parser.parse( source );
@@ -20411,19 +20411,19 @@ function go(source) {
 
         var validValues = [ "type", 'id', 'value', "default", "name", 'operator', 'left', 'right', 'object', 'callee', 'property', 'argument', 'init', "test", 'first', 'second', 'third', 'fourth', 'direction', 'label', 'declaration', "dataType",  "kind", "returnType", "discriminant" ];
         var groupValues = [ "cases", "params", "arguments", "body", "consequent", "alternate", "elements", "expression", "declarations", "declarations" ];
-        
+
         validValues = validValues.concat( groupValues );
-        
+
         var indexPosVals = [ "range" ];
         var relativePosVals = [ "start", "end", "col", "line", "loc" ];
-        
-        if( $( '#lineColBased' ).prop( "checked" ) ) { 
+
+        if( $( '#lineColBased' ).prop( "checked" ) ) {
             validValues = validValues.concat( relativePosVals );
-        }        
-        if( $( '#indexBased' ).prop( "checked" ) ) { 
+        }
+        if( $( '#indexBased' ).prop( "checked" ) ) {
             validValues = validValues.concat( indexPosVals );
-        }        
-        
+        }
+
         msg = JSON.stringify( tree, validValues, 3 );
 
         $( '#error').hide();
@@ -20444,11 +20444,11 @@ function go(source) {
         $( '#error').html(e.name + ": " + e.message + positionInfo );
         $( '#error').show();
     }
-    
-    displayLexResults( parser.getTokens() );    
-    
+
+    displayLexResults( parser.getTokens() );
+
     document.getElementById( "parseTime" ).innerHTML = "Parse: " + ( endTime - beginTime ).toFixed( 2 ) + " ms";
-    
+
 }
 
 function doInstrument(editor) {
@@ -20460,7 +20460,7 @@ function doInstrument(editor) {
     function funcIDGen( name ) {
         return gen.newID( scriptID + name );
     }
-    
+
     try {
         var tree = parser.parse( source );
         var result = profiler( parser.getSource(), tree, funcIDGen );
@@ -20496,47 +20496,47 @@ function doCodeCoverage(editor) {
     }
 }
 
-$( function() { 
+$( function() {
     var editor = ace.edit("editor");
     editor.setTheme( "ace/theme/eclipse" );
 
-    function doParse() { 
+    function doParse() {
         var v = editor.getValue();
         go( v );
     }
 
-    $( '#tokenList' ).delegate( 'li', 'click', function() { 
+    $( '#tokenList' ).delegate( 'li', 'click', function() {
         // fix warnings.
         editor.$blockScrolling = Infinity;
         editor.setAnimatedScroll( true );
 
         var $el = $( this );
-        
+
         var fromRow = parseInt( $el.attr( 'd-row-from' ),10 ),
             toRow = parseInt( $el.attr( 'd-row-to' ), 10 ),
             fromCol = parseInt( $el.attr( 'd-col-from' ), 10 ),
             toCol = parseInt( $el.attr( 'd-col-to' ), 10 );
-        
+
         var sel = editor.selection;
         var newSel = { start: { row: fromRow, column: fromCol }, end: { row: toRow, column: toCol } };
-        
+
         editor.scrollToLine( fromRow, false, true, function() {} );
         sel.setSelectionRange( newSel );
         editor.focus();
     } );
-    
-    $( '#indexBased' ).click( function() { 
-    
+
+    $( '#indexBased' ).click( function() {
+
     } );
-    
-    $( '#instrument' ).click( function() { 
+
+    $( '#instrument' ).click( function() {
         doInstrument( editor );
     } );
 
-    $( '#codecoverage' ).click( function() { 
+    $( '#codecoverage' ).click( function() {
         doCodeCoverage( editor );
     } );
-    
+
     $( '#wrapNL,#indexBased,#lineColBased' ).click( doParse );
 
     editor.selection.on( 'changeCursor', function() {
@@ -20546,7 +20546,7 @@ $( function() {
 
     var throttledParse = _.debounce( doParse, 1000 );
     editor.on( 'change', throttledParse );
-    
+
     doParse();
 } );
 },{"../../bannockburn":1,"../src/idgen":25,"../src/instrument/coverage":26,"../src/instrument/profile":27,"lodash":22}],12:[function(require,module,exports){
@@ -55048,7 +55048,7 @@ var EditList = require("./../edits"),
   Walker = require("bannockburn").Walker,
   _ = require("lodash");
 
-/** 
+/**
  * Block class
  * Each block represents one or more lines of code that will
  * have to execute if the beginning of the block is reached.
@@ -55100,7 +55100,7 @@ function BlockTracker(options) {
     headerFn = options.headerFn,
     scope = options.scope || this;
 
-  /** 
+  /**
      * Sets the current function.
      * @param {string} name The name of the function
      */
@@ -55129,9 +55129,9 @@ function BlockTracker(options) {
   };
 
   /**
-     * Adds a line into the appropriate block, which is normally the block that 
+     * Adds a line into the appropriate block, which is normally the block that
      * is on the top of the stack.
-     * 
+     *
      * @param {Integer} line - The line that should be included.
      * @param {Integer} insertPos - The character index where instrumentation should be inserted if needed.
      */
@@ -55192,14 +55192,14 @@ function BlockTracker(options) {
     throw Error("Invalid startBlock argument(s): " + JSON.stringify(arguments));
   };
 
-  /** 
+  /**
      * Ends a block
      */
   this.endBlock = function() {
     return blockStack.pop();
   };
 
-  /** 
+  /**
      * Traverses the stack, resetting blocks until a block of type blockType is found.
      * @param {Integer} blockType - The type of block to find.
      */
@@ -55217,7 +55217,7 @@ function BlockTracker(options) {
     }
   };
 
-  /** 
+  /**
      * Returns the blocks that were defined.
      */
   this.getBlocks = function() {

@@ -3,6 +3,8 @@ const _ = require("lodash"),
     cmp = require("../compare"),
     { getStaticStr, getStaticList } = require("../staticval");
 
+const { getNode, getNodeProp } = require("../nodeutil");
+
 class Builder {
     constructor(cfg, current) {
         this.cfg = cfg;
@@ -381,6 +383,8 @@ class CFG {
     }
 
     findPaths() {
+        let pathCount = 0;
+
         if (this.blocks.length > 105) {
             console.error("********** TOO MANY BLOCKS ****************");
             console.error(this.blocks.length);
@@ -401,7 +405,12 @@ class CFG {
             let nextNodes = [];
             if (node.succs) {
                 nextNodes = node.succs.filter(s => chain.indexOf(s.index) === -1);
-                nextNodes.forEach(n => walkTree([...chain, node.index], n));
+
+                if (node.nodes.length) {
+                    nextNodes.forEach(n => walkTree([...chain, node.index], n));
+                } else {
+                    nextNodes.forEach(n => walkTree(chain, n));
+                }
             }
 
             if (nextNodes.length === 0) {
@@ -413,6 +422,8 @@ class CFG {
         // paths is a list of lists of blocks...
         let entry = this.blocks[0];
         walkTree([], entry);
+
+        console.log("Path count: ", pathCount);
 
         return paths.map(p => p.map(nIndex => indexMap[nIndex]));
     }
@@ -473,6 +484,46 @@ class CFG {
     }
 }
 
+const isQuery = node => {
+    const n = getNode(node);
+
+    if (!n || !n.callee) {
+        return false;
+    }
+
+    const callee = getNodeProp(n, "callee");
+
+    if (!callee || callee.type !== "MemberExpression") {
+        return false;
+    }
+
+    const propertyVal = (getNodeProp(callee, "property", "value") || "").toLowerCase();
+    const objVal = (getNodeProp(callee, "object", "value") || "").toLowerCase();
+
+    if (objVal === "capi" && n.arguments && n.arguments.length > 1) {
+        if (propertyVal === "exec") {
+            return { type: "CAPI.Exec", statement: n.arguments[1] };
+        } else if (propertyVal === "execn") {
+            return true;
+        }
+        return false;
+    }
+
+    if (
+        (propertyVal === "execsql" || propertyVal === "query") &&
+        n.arguments &&
+        n.arguments.length > 1
+    ) {
+        // same semantics -- just use execsql
+        return true;
+    } else if (propertyVal === "exec" && objVal && n.arguments && n.arguments.length > 0) {
+        // prgCtx and dbConnect both have an exec function...
+        return true;
+    }
+
+    return false;
+};
+
 class Block {
     constructor(comment, index) {
         this.comment = comment;
@@ -480,6 +531,34 @@ class Block {
         this.nodes = [];
         this.succs = [];
         this.unreachable = false;
+    }
+
+    hasRelevantStatements() {
+        let isRelevant = false;
+
+        let visit = (n, label) => {
+            if (!n) return;
+
+            if (isAssignment(n)) {
+                isRelevant = true;
+                return false;
+            } else if (isDeclr(n)) {
+                if (["string", "integer"].indexOf(n.dataType.value.toLowerCase()) !== -1) {
+                    isRelevant = true;
+                    return false;
+                }
+                return;
+            } else if (n.type === "CallExpression" && isQuery(n)) {
+                isRelevant = true;
+                return false;
+            }
+
+            return visit;
+        };
+
+        walk(visit, this.nodes);
+
+        return isRelevant;
     }
 
     containsNode(node) {
@@ -536,6 +615,8 @@ class Block {
                             varsOut[varName] = null;
                         } else if (varsOut.hasOwnProperty(varName) && varsOut[varName] !== null) {
                             varsOut[varName] = varsOut[varName].plus(staticVal);
+                        } else if (!assignFirst && !varsOut.hasOwnProperty(varName)) {
+                            varsOut[varName] = staticVal;
                         }
                     } else {
                         console.log("Unknown operator: ", n.operator);
@@ -576,17 +657,6 @@ class Block {
         return varsOut;
     }
 }
-
-var getNode = n => {
-    if (_.isArray(n)) {
-        if (n.length === 0) {
-            return null;
-        }
-
-        return n[0];
-    }
-    return n;
-};
 
 var varInit = {
     type: "VariableDeclarator",

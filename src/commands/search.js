@@ -36,7 +36,7 @@ function processFiles(srcFiles, params) {
     return Q.nfcall(async.mapLimit, srcFiles, 4, processEach.bind(null, params)).then(combine);
 }
 
-const queryRe = /(prgctx\.exec|dbconnect\.exec|capi\.execn?|\.execsql|\.query)\s*\(/gi;
+const queryRe = /(ExportQuery|FindMissingIDs|prgctx\.exec|dbconnect\.exec|capi\.execn?|\.execsql|\.query)\s*\(/gi;
 
 function processEach(params, file, done) {
     // console.log( "Reading file: ", file );

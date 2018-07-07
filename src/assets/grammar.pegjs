@@ -1245,7 +1245,7 @@ select_parts_core
   }
 
 select_core_select "SELECT Results Clause"
-  = SELECT o n:(select_top)? d:( select_modifier )? o t:( select_target )
+  = SELECT o d:( select_modifier )? o n:(select_top)? t:( select_target )
   {
     return Object.assign({
       'result': t

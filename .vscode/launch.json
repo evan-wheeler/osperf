@@ -41,6 +41,16 @@
             "request": "launch",
             "name": "Launch Program",
             "program": "${workspaceRoot}\\index.js"
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Launch Test 2",
+            "program": "${workspaceRoot}\\index.js",
+            "args": [
+                "test",
+                "c:/opentext/sharedsc/replicator/ospace_src/Replicator Root/TableWriters/DTREE/_PostExecute.Script"
+            ]
         }
     ]
 }
