@@ -127,7 +127,7 @@ const getStrFormat = (node, vars) => {
     }
 
     if (parts.length === 1) {
-        return part[0];
+        return parts[0];
     }
 
     const [first, ...rest] = parts;
