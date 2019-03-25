@@ -33,7 +33,7 @@ function cover(modules, options) {
   };
 
   return parseUtils
-    .listScriptsInModules(modObjs)
+    .listScriptsInModules(modObjs, false)
     .then(function(allFiles) {
       return processFiles(allFiles, params);
     })

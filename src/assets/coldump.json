@@ -6138,5 +6138,6 @@
     "RM_CLASSIFICATION.Subject",
     "BestBetsSearch.BestBetSearch",
     "BestBetsSearch.DataID",
-    "BestBetsSearch.Expired"
+    "BestBetsSearch.Expired",
+    "MyTable.Test"
 ]

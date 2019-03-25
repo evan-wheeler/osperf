@@ -14,10 +14,10 @@ var includesPath = path.join(__dirname, "assets/includes"),
   scriptTemplatePath = path.join(__dirname, "assets/creport_script.html");
 
 var templates = {
-  script: ejs.compile(fs.readFileSync(scriptTemplatePath, "utf8"), {
+  script: ejs.compile(fs.readFileSync(scriptTemplatePath, {encoding: 'utf-8'}), {
     filename: scriptTemplatePath
   }),
-  directory: ejs.compile(fs.readFileSync(dirTemplatePath, "utf8"), {
+  directory: ejs.compile(fs.readFileSync(dirTemplatePath, {encoding: 'utf-8'}), {
     filename: dirTemplatePath
   })
 };
@@ -58,7 +58,24 @@ function coverageReport(visitGlobs, options) {
  * @returns {!Promise}
  */
 function copyReportAssets(reportDir) {
-  return Q.nfcall(ncp, includesPath, reportDir);
+  ncp.limit = 4;
+
+
+  var d = Q.defer();
+
+  var dest = path.isAbsolute( reportDir) ? reportDir : path.resolve( ".", reportDir );
+
+  console.log( "Trying to copy -R from: ", includesPath, " to report directory: ", dest );
+
+  ncp( includesPath, dest, function(err) { 
+    if( err ) { 
+      d.reject( err );
+    } else { 
+      d.resolve( true );
+    } 
+  } );
+
+  return d.promise;
 }
 
 /**
@@ -71,7 +88,7 @@ function generateReport(dir, visits, coverInfo) {
   createReportDir(dir)
     .then(function(reportDir) {
       var reportData = collectScriptData(visits, coverInfo);
-      var scriptPaths = _.pluck(reportData, "path");
+      var scriptPaths = _.map(reportData, "path");
       var shellInfo = getTreeFromPaths(scriptPaths);
       var dirStats = buildDirStats(reportData, shellInfo);
 
@@ -101,8 +118,7 @@ function writeReports(reportDir, shellInfo, reportData, dirStats, coverInfo) {
         cb(err);
       }
     );
-  })
-    .then(function() {
+  }).then(function() {
       var dirNames = _.keys(dirStats);
 
       return Q.nfcall(async.mapLimit, dirNames, 10, function(dirName, cb) {
@@ -118,8 +134,11 @@ function writeReports(reportDir, shellInfo, reportData, dirStats, coverInfo) {
       });
     })
     .then(function() {
+      console.log( "Copying assets ...");
       return copyReportAssets(reportDir);
-    });
+    }).then( function() { 
+      console.log( "Done" );
+    }).done();
 }
 
 function setOnAllLines(linesArray, format) {
@@ -241,9 +260,13 @@ function writeScriptHTML(
     scriptLinks: JSON.stringify(objectScripts)
   });
 
+  var fpath = path.join(reportDir, scriptData.path);
+
+  console.log( "Writing file: ", fpath );
+
   return Q.nfcall(
     fs.writeFile,
-    path.join(reportDir, scriptData.path) + ".html",
+    fpath + ".html",
     content,
     "utf8"
   );
@@ -435,7 +458,7 @@ function mergeVisits(files) {
  * @returns {!Promise.<RESULT>|*} Returns a promise for the result
  */
 function loadCoverageFile(filename) {
-  return Q.nfcall(fs.readFile, filename, "utf8").then(function(data) {
+  return Q.nfcall(fs.readFile, filename, {encoding: 'utf-8'}).then(function(data) {
     return JSON.parse(data);
   });
 }
@@ -447,17 +470,21 @@ function loadCoverageFile(filename) {
  * @returns {!Promise.<RESULT>|*}
  */
 function createReportDir(dir) {
+
   var reportDir = path.join(dir, "report");
 
   return Q.allSettled([Q.nfcall(fs.mkdir, dir)])
     .then(function() {
+
       // either way, try to create the report directory.
       return Q.nfcall(fs.mkdir, reportDir).fail(function() {
+        
         // try removing the report directory.
         return Q.nfcall(rimraf, reportDir).then(function() {
           // then create it.
           return Q.nfcall(fs.mkdir, reportDir);
         });
+      
       });
     })
     .then(function() {
@@ -475,8 +502,13 @@ function buildReportShell(baseDir, children) {
   return Q.all(
     _.keys(children).map(function(dirName) {
       var joinedPath = path.join(baseDir, dirName);
+      console.log( "Trying to create directory: ", joinedPath );
+      
       return Q.nfcall(fs.mkdir, joinedPath).then(function() {
         return buildReportShell(joinedPath, children[dirName]);
+      }).fail( function( err ) { 
+        console.log( "Problem: ", err );
+        // return buildReportShell(joinedPath, children[dirName]);
       });
     })
   );
@@ -634,7 +666,7 @@ function scriptPathToObjInfo(p) {
 
   objInfo.pathParts.push({ type: "script", label: objInfo.scriptName });
 
-  var labels = _.pluck(objInfo.pathParts, "label");
+  var labels = _.map(objInfo.pathParts, "label");
 
   objInfo.parentPath = labels.slice(0, -1).join("/");
   objInfo.path = labels.join("/");

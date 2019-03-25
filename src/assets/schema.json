@@ -7289,6 +7289,12 @@
         "storage": "STORAGE",
         "subject": "Subject"
       }
+    },
+    "mytable": {
+      "name": "MyTable",
+      "cols": {
+        "test": "Test"
+      }
     }
   },
   "cols": {}

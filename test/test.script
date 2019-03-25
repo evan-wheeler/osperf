@@ -1,74 +1,143 @@
-// Some SQL statements automatically fixed by osperf... 
-Function Assoc SetDestinationID( Object prgCtx, \
-								Integer homeServerID, \
-								Integer homeDataID, \
-								Integer destServerID, \
-								Integer destDataID, \
-								String contractType = undefined )
-
-	/*
-	 * This is usually called when we're importing a row that 
-	 * contains an ID that originated on another system and 
-	 * we are setting the value that will be on this system.
-	 */
-
-	Assoc rtn
-	rtn.ok = true
-	rtn.methodName = "SetDestinationID"
-
-	if prgCtx.fDbConnect.StartTrans()
-
-		String updateSQL = "UPDATE REPL_OBJECT_SERVERS SET SERVER_DATAID =:A1 " + \
-							"WHERE HOME_SERVER_ID=:A2 AND SERVER_ID=:A3 AND DATAID=:A4"
-		
-		List bindVars = { destDataID, homeServerID, destServerID, homeDataID } 	
+function Dynamic Get( Object prgCtx, \
+					  Dynamic keys, \
+					  Integer dataType, \
+					  Integer listItemType = dataType, \
+					  Dynamic defaultVal = undefined, \						  
+					  Boolean isLong = false,\
+					  Boolean orderByInt = false)
+					  
+	Assoc rtn = .InitErrObj("dataCache.Get")		
 	
-		if IsDefined( contractType )
-			updateSQL += " and Replication_Type = :A5"
-			bindVars = { @bindVars, contractType }
-		end
-		
-		Integer result = .ExecSQL( prgCtx, updateSQL, bindVars )
-		
-		if IsError( result )
-			.SetErrObj( rtn, result, prgCtx )
-		else
-			rtn.result = result
-		end	
-		
-		// invalidate the import cache.
-		
-		if destServerID == $Replicator.ServerAPI.GetLocalServerID( prgCtx ).result
-			
-			// Other server is the home server
-			
-			// If the contract that we're changing is a C contract, update the cache with the
-			// new ID.
-			
-			.InvalidateMappingCache( homeServerID, homeDataID, contractType == 'C' ? destDataID : undefined )
-						
-			.InvalidateRemoteIDCache( homeServerID, homeDataID )
-			.InvalidateLocalIDCache( destDataID )
-			
-			.AddContractActivityRecord( prgCtx, homeDataID, homeServerID, destServerID, 'U', contractType ) 
+	// *** return value
+	Dynamic result			  
 
-		else
-			
-			// The dest server is actually another server. This server
-			// owns the home data ID ... atypical case -- maybe even an error -- 
-			// TODO: Maybe log this out?
-						
-			.InvalidateMappingCache( destServerID, destDataID, homeDataID )
-			.InvalidateRemoteIDCache( destServerID, destDataID )
-			.InvalidateLocalIDCache( homeDataID )
-			
-			.GetLogger().Error( "Possibly setting the server_dataID on the wrong server. Arguments: {}", { Parameters() } )
-		end
-			
-		prgCtx.fDBConnect.EndTrans( rtn.ok )
-	else
-		.SetErrObj( rtn, "Could not start transaction" )
+	if dataType == ListType && listItemType == ListType
+		.GetLogger().Warn("DataCache.Get Caller passed in List dataType without specifying the type of item in the List. A List of lists is not allowed.  List item type assumed to be string.")
+		listItemType = StringType 
+	end
+
+	if IsDefined(keys) && Type(keys) != ListType
+		keys = {keys}
 	end
 	
-	return rtn
-end								 
+	if Type(keys) != ListType
+		keys = {keys}
+	end
+	
+	Integer i
+	for i=1 to Length(keys)
+		// *** Do we need to hash the key (i.e. for unwieldy file paths and such)?
+		keys[i] = ._FormatKey(keys[i])	
+	end	
+	
+	// **** which data col to put in
+	String dataCol = ""
+
+	// *** Now build the statement
+	String stmt
+	List subs
+	
+	// *** do a distinct?
+	if dataType==ListType && dataCol != "VAL_LONG" && !orderByInt
+		
+		// *** SQL server does not allow DISTINCT on NTEXT columns
+		if IsDefined(Str.Locate(dataCol, "VAL_STRING_MAX")) && $DataManager.SynCoreInterface.IsMSSQL()
+			// do nothing
+		else
+			dataCol = "DISTINCT " + dataCol
+		end	
+		
+	end
+	
+	if 0; dataCol = "*"; end;
+
+	switch Length(keys)
+		case 1
+			stmt = Str.Format('select %1 from datamanager_datacache where job_id=:A1 and job_type=:A2 and key1=:A3', dataCol)
+			subs = {._fJobId, ._fJobType, keys[1]}
+		end
+		
+		case 2
+			stmt = Str.Format('select %1 from datamanager_datacache where job_id=:A1 and job_type=:A2 and key1=:A3 and key2=:A4', dataCol)
+			subs = {._fJobId, ._fJobType, keys[1], keys[2]}
+		end
+	end
+	
+	// *** order by int?
+	if orderByInt
+		stmt += ' order by VAL_INT'
+	end
+		
+	
+	RecArray recs = .ExecSql(prgCtx, stmt, subs)
+	if IsNotError(recs) && Length(recs)
+			
+		if dataType != ListType
+
+			if dataType == StringType && Length(RecArray.FieldNames(recs)) > 1
+				result = IsDefined(recs[1][1]) ? recs[1][1] : recs[1][2]
+				
+			else
+				result = recs[1][1]
+			end
+			
+			result = _ConvertVal(result, dataType)
+
+		elseif dataType == ListType
+	
+			// *** did we select a string?  which col is it, the max or the 255 column?
+			if listItemType == StringType && Length(RecArray.FieldNames(recs)) > 1
+				List valList1 = RecArray.ColumnToList(recs, 1)
+				List valList2 = RecArray.ColumnToList(recs, 2)			
+				result = {}
+			
+				Dynamic val
+				for i = 1 to Length(valList1)
+					val = IsDefined(valList1[i]) ? valList1[i] : valList2[i]
+					
+					val = Type(val) != listItemType ? _ConvertVal(val, listItemType) : val
+					
+					if orderByInt
+						result = {@result, val}
+					else
+						result = List.SetAdd(result, val)
+					end	
+				end			
+			else
+				List valList = RecArray.ColumnToList(recs, 1)
+				result = {}
+			
+				Dynamic val
+				for val in valList
+					result = List.SetAdd(result, _ConvertVal(val, listItemType))
+				end	
+			end
+	
+			if Length(result) == 1 && IsUndefined(result[1])	
+				result = {}
+			end
+		end			
+	
+	elseif IsNotError(recs) && !Length(recs) && dataType == ListType
+	
+		result = {}	
+
+	end
+
+	return result
+end
+
+function _ConvertVal(val, dataType)
+
+	if dataType==ListType && Type(val) != ListType
+		val = {val}
+	elseif dataType== Assoc.AssocType && Type(val) == StringType
+			val = Str.StringToValue(val)
+	elseif dataType== IntegerType && Type(val) == StringType
+		val = Str.StringToInteger(val)
+	elseif dataType== RealType && Type(val) == StringType
+		val = Str.StringToReal(val)
+	end
+	
+	return val
+end

@@ -13,10 +13,10 @@ var exports = module.exports;
 
 /* Common functions */
 
-exports.listScriptsInModules = function(modules) {
+exports.listScriptsInModules = function(modules, includeHTML) {
     return Q.nfcall(async.map, modules, function(mod, cb) {
         let scripts = mod.getScripts();
-        let html = mod.getHTML();
+        let html = includeHTML === false ?  [] : mod.getHTML();
         let all = [].concat(html, scripts);
         cb(null, all);
     }).then(function(results) {
