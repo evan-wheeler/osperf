@@ -21,7 +21,9 @@ const getQueryStmt = node => {
         return null;
     }
 
-    const propertyVal = (getNodeProp(callee, "property", "value") || "").toLowerCase();
+    const propertyVal = (
+        getNodeProp(callee, "property", "value") || ""
+    ).toLowerCase();
     const objVal = (getNodeProp(callee, "object", "value") || "").toLowerCase();
 
     if (objVal === "capi" && n.arguments && n.arguments.length > 1) {
@@ -43,7 +45,12 @@ const getQueryStmt = node => {
     ) {
         // same semantics -- just use execsql
         return { type: "ExecSQL", statement: n.arguments[1] };
-    } else if (propertyVal === "exec" && objVal && n.arguments && n.arguments.length > 0) {
+    } else if (
+        propertyVal === "exec" &&
+        objVal &&
+        n.arguments &&
+        n.arguments.length > 0
+    ) {
         // prgCtx and dbConnect both have an exec function...
         return { type: "Exec", statement: n.arguments[0] };
     }
@@ -67,7 +74,11 @@ const mergeReplacements = (existing, cur) => {
             let badmatch = false;
 
             matches.find(e => {
-                if (e.start === r.start && e.end === r.end && e.value === r.value) {
+                if (
+                    e.start === r.start &&
+                    e.end === r.end &&
+                    e.value === r.value
+                ) {
                     dup = true;
                     return true;
                 }
@@ -78,7 +89,10 @@ const mergeReplacements = (existing, cur) => {
                     rStart = r.start < e.start ? e.start : r.start,
                     rEnd = r.end > e.end ? e.end : r.end;
 
-                if (e.value.substring(eStart, eEnd) !== r.value.substring(rStart, rEnd)) {
+                if (
+                    e.value.substring(eStart, eEnd) !==
+                    r.value.substring(rStart, rEnd)
+                ) {
                     badMatch = true;
                     return true;
                 }
@@ -86,9 +100,9 @@ const mergeReplacements = (existing, cur) => {
 
             if (badmatch) {
                 throw new Error(
-                    `Bad replacement - Existing = ${JSON.stringify(r)}, Bad: ${JSON.stringify(
-                        badmatch
-                    )}`
+                    `Bad replacement - Existing = ${JSON.stringify(
+                        r
+                    )}, Bad: ${JSON.stringify(badmatch)}`
                 );
             }
         }
@@ -161,12 +175,29 @@ const asURL = f => {
 const NoCheckDirective = node => {
     return (
         node.annotation &&
-        (node.annotation.tag === "sqlnocheck" || node.annotation.tag === "nosqlcheck")
+        (node.annotation.tag === "sqlnocheck" ||
+            node.annotation.tag === "nosqlcheck")
     );
 };
 
 module.exports = function fixSQLCase(src, ast, file) {
-    console.log(asURL(file));
+    var __CUR_OSCRIPT__ = asURL(file),
+        __CUR_QUERY__ = "";
+
+    function statusMsg() {
+        if (__CUR_OSCRIPT__) {
+            console.log(__CUR_OSCRIPT__);
+            __CUR_OSCRIPT__ = "";
+        }
+
+        if (__CUR_QUERY__) {
+            console.log("    > ", __CUR_QUERY__);
+            __CUR_QUERY__ = "";
+        }
+
+        // log all args.
+        console.log.apply(console, [...arguments]);
+    }
 
     const report = new FileReport(file);
 
@@ -204,7 +235,7 @@ module.exports = function fixSQLCase(src, ast, file) {
         let qKey = q;
 
         if (stmtHistory.hasOwnProperty(qKey)) {
-            console.log("Duplicate");
+            // console.log("Duplicate");
             return stmtHistory[qKey];
         }
 
@@ -215,33 +246,36 @@ module.exports = function fixSQLCase(src, ast, file) {
 
             if (result !== q) {
                 if (warnings.length) {
-                    console.log(`   Warnings and corrections ${type}:`, result);
-                    console.log("          Warnings: ", warnings);
+                    statusMsg(`   Warnings and corrections ${type}:`, result);
+                    statusMsg("          Warnings: ", warnings);
                     report.curExec().addWarning(staticVal, warnings);
                 } else {
-                    console.log(`   Fixed ${type}:`, result);
+                    statusMsg(`   Fixed ${type}:`, result);
                     report.curExec().addGood(staticVal);
                 }
 
                 stats.fixed++;
-                replacements = mergeReplacements(replacements, staticVal.replace(result));
+                replacements = mergeReplacements(
+                    replacements,
+                    staticVal.replace(result)
+                );
                 stmtHistory[qKey] = true;
 
                 return true;
             }
 
             if (warnings.length) {
-                console.log(`      ---> Warnings only ${type}:`, q);
-                console.log("          Warnings: ", warnings);
+                statusMsg(`      ---> Warnings only ${type}:`, q);
+                statusMsg("          Warnings: ", warnings);
             } else {
-                console.log(`      ---> Good ${type}:`, q);
+                // statusMsg(`      ---> Good ${type}:`, q);
                 report.curExec().addGood(staticVal);
             }
 
             stats.good++;
         } catch (e) {
             // parse error ...
-            console.log("      # Could not parse: ", q);
+            statusMsg("      # Could not parse: ", q);
             stmtHistory[qKey] = null;
             report.curExec().addError(staticVal, e.message);
             return null;
@@ -254,7 +288,7 @@ module.exports = function fixSQLCase(src, ast, file) {
 
     w.on("FunctionDeclaration", function(node) {
         if (NoCheckDirective(node)) {
-            console.log("  Skipping function due to NoSQLCheck");
+            statusMsg("  Skipping function due to NoSQLCheck");
             return false;
         }
 
@@ -279,7 +313,8 @@ module.exports = function fixSQLCase(src, ast, file) {
         if (qInfo !== null) {
             var nodeCode = src.substring(node.range[0], node.range[1] + 1);
 
-            console.log("    > ", nodeCode);
+            __CUR_QUERY__ = nodeCode;
+
             report.newExec(node);
 
             stats.statements++;
@@ -292,7 +327,8 @@ module.exports = function fixSQLCase(src, ast, file) {
                     const bindVals = getNode(node.arguments[2]);
 
                     if (bindVals.type !== "ListExpression") {
-                        const varName = bindVals.arity === "name" ? bindVals.value : "";
+                        const varName =
+                            bindVals.arity === "name" ? bindVals.value : "";
 
                         if (
                             [
@@ -306,7 +342,10 @@ module.exports = function fixSQLCase(src, ast, file) {
                                 "bindvals"
                             ].indexOf(varName.toLowerCase()) === -1
                         ) {
-                            console.warn(">>>>>> Might be a problem: ", nodeCode);
+                            console.warn(
+                                ">>>>>> Might be a problem: ",
+                                nodeCode
+                            );
                         }
                     }
                 }
@@ -393,7 +432,7 @@ module.exports = function fixSQLCase(src, ast, file) {
                     });
 
                     if (badPaths) {
-                        console.log("   * Some paths were not computed");
+                        statusMsg("   * Some paths were not computed");
                         stats.partial++;
                     }
 
@@ -402,8 +441,10 @@ module.exports = function fixSQLCase(src, ast, file) {
             }
 
             stats.unsolved++;
-            console.log(
-                `           #### NO SOLUTIONS ####: "${asURL(file)}:${node.loc.start.line}"`
+            statusMsg(
+                `           #### NO SOLUTIONS ####: "${asURL(file)}:${
+                    node.loc.start.line
+                }"`
             );
         }
     });

@@ -37,6 +37,19 @@ var strFormat = {
     type: "CallExpression"
 };
 
+var strFormatSubquery = {
+    arity: "binary",
+    callee: {
+        arity: "binary",
+        property: {
+            value: "_Subquery",
+            arity: "literal"
+        },
+        type: "MemberExpression"
+    },
+    type: "CallExpression"
+};
+
 const getStrFormat = (node, vars) => {
     let staticArgs = [];
 
@@ -114,7 +127,9 @@ const getStrFormat = (node, vars) => {
             parts.push(new StaticSubstr(staticSpans, nextStart, pos));
 
             if (vIdx >= staticArgs.length) {
-                throw error("Str.Format out of range on indexed replacement: " + vIdx);
+                throw error(
+                    "Str.Format out of range on indexed replacement: " + vIdx
+                );
             }
 
             parts.push(staticArgs[vIdx]);
@@ -160,7 +175,8 @@ const getStaticStr = function(node, vars) {
     }
 
     if (node.arity === "name") {
-        let varName = typeof node.value === "string" ? node.value.toLowerCase() : "";
+        let varName =
+            typeof node.value === "string" ? node.value.toLowerCase() : "";
 
         const variable = vars[varName];
         if (variable) {
@@ -192,7 +208,7 @@ const getStaticStr = function(node, vars) {
         }
     }
 
-    if (cmp(node, strFormat)) {
+    if (cmp(node, strFormat) || cmp(node, strFormatSubquery)) {
         return getStrFormat(node, vars);
     }
     return null;

@@ -184,7 +184,10 @@ class Builder {
             this.jump(block);
             this.current = block;
             this.add(
-                makeAssignment(varNode, staticVal, { range: rangeNode.range, loc: rangeNode.loc })
+                makeAssignment(varNode, staticVal, {
+                    range: rangeNode.range,
+                    loc: rangeNode.loc
+                })
             );
             this.jump(done);
             this.current = start;
@@ -376,7 +379,26 @@ class CFG {
 
     build(root) {
         var b = new Builder(this, null);
+
         b.current = b.newBlock("entry");
+
+        if (root.type === "FunctionDeclaration" && root.params) {
+            for (var p of root.params) {
+                if (p.default) {
+                    b.add(
+                        makeAssignment(p.name, p.default, {
+                            range: [p.name.range[0], p.default.range[1]],
+                            loc: {
+                                start: p.name.loc.start,
+                                end: p.default.loc.end
+                            }
+                        })
+                    );
+                }
+            }
+        }
+
+        // assign any default arguments.
         b.stmt(root.body);
 
         return b.cfg;
@@ -404,7 +426,9 @@ class CFG {
         const walkTree = (chain, node) => {
             let nextNodes = [];
             if (node.succs) {
-                nextNodes = node.succs.filter(s => chain.indexOf(s.index) === -1);
+                nextNodes = node.succs.filter(
+                    s => chain.indexOf(s.index) === -1
+                );
 
                 if (node.nodes.length) {
                     nextNodes.forEach(n => walkTree([...chain, node.index], n));
@@ -497,7 +521,9 @@ const isQuery = node => {
         return false;
     }
 
-    const propertyVal = (getNodeProp(callee, "property", "value") || "").toLowerCase();
+    const propertyVal = (
+        getNodeProp(callee, "property", "value") || ""
+    ).toLowerCase();
     const objVal = (getNodeProp(callee, "object", "value") || "").toLowerCase();
 
     if (objVal === "capi" && n.arguments && n.arguments.length > 1) {
@@ -516,7 +542,12 @@ const isQuery = node => {
     ) {
         // same semantics -- just use execsql
         return true;
-    } else if (propertyVal === "exec" && objVal && n.arguments && n.arguments.length > 0) {
+    } else if (
+        propertyVal === "exec" &&
+        objVal &&
+        n.arguments &&
+        n.arguments.length > 0
+    ) {
         // prgCtx and dbConnect both have an exec function...
         return true;
     }
@@ -543,7 +574,11 @@ class Block {
                 isRelevant = true;
                 return false;
             } else if (isDeclr(n)) {
-                if (["string", "integer"].indexOf(n.dataType.value.toLowerCase()) !== -1) {
+                if (
+                    ["string", "integer"].indexOf(
+                        n.dataType.value.toLowerCase()
+                    ) !== -1
+                ) {
                     isRelevant = true;
                     return false;
                 }
@@ -585,7 +620,9 @@ class Block {
     }
 
     get code() {
-        return this.nodes.length ? this.nodes.map(v => v.code || "").join("\n") : "";
+        return this.nodes.length
+            ? this.nodes.map(v => v.code || "").join("\n")
+            : "";
     }
 
     traceVars(varsIn, maxStartRange, assignFirst) {
@@ -613,9 +650,15 @@ class Block {
                         if (assignFirst && _.isNull(varsOut[varName])) {
                             // not allowed...
                             varsOut[varName] = null;
-                        } else if (varsOut.hasOwnProperty(varName) && varsOut[varName] !== null) {
+                        } else if (
+                            varsOut.hasOwnProperty(varName) &&
+                            varsOut[varName] !== null
+                        ) {
                             varsOut[varName] = varsOut[varName].plus(staticVal);
-                        } else if (!assignFirst && !varsOut.hasOwnProperty(varName)) {
+                        } else if (
+                            !assignFirst &&
+                            !varsOut.hasOwnProperty(varName)
+                        ) {
                             varsOut[varName] = staticVal;
                         }
                     } else {
@@ -628,8 +671,15 @@ class Block {
             } else if (isDeclr(n)) {
                 let varName = getNode(n.name).value.toLowerCase();
 
-                if (varsIn.hasOwnProperty(varName) && varsIn[varName].value !== "") {
-                    console.log("shadowed variable ", varName, " -- skipping ...");
+                if (
+                    varsIn.hasOwnProperty(varName) &&
+                    varsIn[varName].value !== ""
+                ) {
+                    console.log(
+                        "shadowed variable ",
+                        varName,
+                        " -- skipping ..."
+                    );
                     varsOut[varName] = null;
                     return;
                 }

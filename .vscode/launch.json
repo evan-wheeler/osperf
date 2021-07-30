@@ -6,51 +6,7 @@
             "request": "launch",
             "name": "Launch Replace",
             "program": "${workspaceRoot}\\index.js",
-            "args": ["replace", "package", "pkg", "contentsentry"]
-        },
-        {
-            "type": "node",
-            "request": "launch",
-            "name": "Launch Search",
-            "program": "${workspaceRoot}\\index.js",
-            "args": ["search", "replicator"]
-        },
-        {
-            "type": "node",
-            "request": "launch",
-            "name": "Launch Search ContentSentry",
-            "program": "${workspaceRoot}\\index.js",
-            "args": ["search", "ContentSentry"]
-        },
-        {
-            "type": "node",
-            "request": "launch",
-            "name": "Launch Unused",
-            "program": "${workspaceRoot}\\index.js",
-            "args": ["unused", "replicator"]
-        },
-        {
-            "type": "node",
-            "request": "launch",
-            "name": "Launch Test",
-            "program": "${workspaceRoot}\\index.js",
-            "args": ["test", "${workspaceRoot}\\test\\test.script"]
-        },
-        {
-            "type": "node",
-            "request": "launch",
-            "name": "Launch Program",
-            "program": "${workspaceRoot}\\index.js"
-        },
-        {
-            "type": "node",
-            "request": "launch",
-            "name": "Launch Test 2",
-            "program": "${workspaceRoot}\\index.js",
-            "args": [
-                "test",
-                "c:/opentext/sharedsc/replicator/ospace_src/Replicator Root/TableWriters/DTREE/_PostExecute.Script"
-            ]
+            "args": ["search", "contentsentry"]
         }
     ]
 }

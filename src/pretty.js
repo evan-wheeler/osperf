@@ -77,9 +77,18 @@ LineFormatter.prototype.expandTabs = function(val, offset) {
         .join("");
 };
 
+function escapeHtml(unsafe) {
+    return unsafe
+         .replace(/&/g, "&amp;")
+         .replace(/</g, "&lt;")
+         .replace(/>/g, "&gt;")
+         .replace(/"/g, "&quot;")
+         .replace(/'/g, "&#039;");
+ }
+
 LineFormatter.prototype.add = function(val, elType, classNames, attrs) {
     var expanded = this.expandTabs(val, this.raw.length),
-        replaced = expanded.replace(/ /g, "&nbsp;");
+        replaced = escapeHtml( expanded ).replace(/ /g, "&nbsp;");
 
     this.raw += expanded;
 
