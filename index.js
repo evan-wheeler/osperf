@@ -63,6 +63,7 @@ program
     "Use base source control directory",
     "c:/opentext/sharedsc/"
   )
+  .option("-p, --pattern <filename>", "Filter files by pattern")
   .action(fixcaseCmd);
 
 program.command("test <file>").description("Test search").action(testCmd);

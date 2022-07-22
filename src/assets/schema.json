@@ -6550,6 +6550,91 @@
         "is_linked_right": "IS_LINKED_RIGHT",
         "template_rightid": "TEMPLATE_RIGHTID"
       }
+    },
+    "repl_excluded_types": {
+      "name": "REPL_EXCLUDED_TYPES",
+      "cols": {
+        "subtype": "SUBTYPE"
+      }
+    },
+    "repl_excluded_owners": {
+      "name": "REPL_EXCLUDED_OWNERS",
+      "cols": {
+        "ownerid": "OWNERID"
+      }
+    },
+    "repl_excluded_ids": {
+      "name": "REPL_EXCLUDED_IDS",
+      "cols": {
+        "id": "ID"
+      }
+    },
+    "repl_vreport_current": {
+      "name": "Repl_VReport_Current",
+      "cols": {
+        "profileid": "ProfileID",
+        "serverid": "ServerID",
+        "dataid": "DataID",
+        "itemid": "ItemID"
+      }
+    },
+    "repl_vreport_stagecurrent": {
+      "name": "Repl_VReport_StageCurrent",
+      "cols": {
+        "pid": "PID",
+        "dataid": "DataID",
+        "itemid": "ItemID"
+      }
+    },
+    "repl_vreport_status": {
+      "name": "Repl_VReport_Status",
+      "cols": {
+        "code": "Code",
+        "codedescr": "CodeDescr"
+      }
+    },
+    "repl_vreport_profile": {
+      "name": "Repl_VReport_Profile",
+      "cols": {
+        "profileid": "ProfileID",
+        "name": "Name",
+        "options": "Options"
+      }
+    },
+    "repl_vreport_item": {
+      "name": "Repl_VReport_Item",
+      "cols": {
+        "itemid": "ItemID",
+        "reportid": "ReportID",
+        "dataid": "DataID",
+        "status": "Status",
+        "diffs": "Diffs",
+        "queued": "Queued",
+        "completed": "Completed",
+        "details": "Details"
+      }
+    },
+    "repl_vreport": {
+      "name": "Repl_VReport",
+      "cols": {
+        "reportid": "ReportID",
+        "serverid": "ServerID",
+        "profileid": "ProfileID",
+        "status": "Status",
+        "description": "Description",
+        "created": "Created",
+        "options": "Options"
+      }
+    },
+    "repl_tracer": {
+      "name": "Repl_Tracer",
+      "cols": {
+        "traceid": "TraceID",
+        "tracetype": "TraceType",
+        "targetserverid": "TargetServerID",
+        "srcstate": "SrcState",
+        "targetstate": "TargetState"
+      }
     }
   },
   "cols": {}

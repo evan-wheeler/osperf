@@ -21,6 +21,10 @@ function fixcase(modules, options) {
 
   var params = {};
 
+  if (options.pattern) {
+    params.pattern = new RegExp(options.pattern);
+  }
+
   return parseUtils
     .listScriptsInModules(modObjs)
     .then(function (allFiles) {
@@ -41,10 +45,17 @@ function processFiles(srcFiles, params) {
   ).then(combine);
 }
 
-const queryRe = /(ExportQuery|FindMissingIDs|prgctx\.exec|dbconnect\.exec|capi\.execn?|\.execsql|\.query)\s*\(/gi;
+const queryRe =
+  /(ExportQuery|FindMissingIDs|prgctx\.exec|dbconnect\.exec|capi\.execn?|\.execsql|\.query)\s*\(/gi;
 
 function processEach(params, file, done) {
   // console.log( "Reading file: ", file );
+
+  if (params.pattern && !file.match(params.pattern)) {
+    // skip file.
+    done(null, {});
+    return;
+  }
 
   parseUtils
     .parseFile(file)
