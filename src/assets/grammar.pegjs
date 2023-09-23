@@ -455,6 +455,7 @@ raise_args_message
 
 expression_root
   = bind_parameter
+  / ranking_function_call
   / function_call
   / literal_value
   / id_column
@@ -721,6 +722,23 @@ expression_list_loop
 expression_list_rest
   = sym_comma e:( expression ) o
   { return e; }
+
+/**
+ * @note 
+ *  Ranking function calls like ntile(col) over (partition/order expression)
+ */ 
+ranking_function_call "Ranking Function Call"
+  = n:NTILE o sym_popen a:( function_call_args )? o sym_pclose o OVER o over_expression 
+  {
+    return Object.assign({
+      'type': 'function',
+      'name': n
+    }, a);
+  }
+
+
+over_expression "Over Expression" 
+  = sym_popen 
 
 /**
  * @note
@@ -3160,6 +3178,8 @@ NOTNULL
   = "NOTNULL"i !name_char
 NULL
   = "NULL"i !name_char
+NTILE 
+  = "NTILE"i !name_char 
 OF
   = "OF"i !name_char
 OFFSET
@@ -3174,6 +3194,8 @@ ORDER
   = "ORDER"i !name_char
 OUTER
   = "OUTER"i !name_char
+OVER
+  = "OVER"i !name_char
 PLAN
   = "PLAN"i !name_char
 PRAGMA
@@ -3278,7 +3300,7 @@ reserved_word_list
     HAVING / IF / IGNORE / IMMEDIATE / IN / INDEX / INDEXED /
     INITIALLY / INNER / INSERT / INSTEAD / INTERSECT / INTO / IS /
     ISNULL / JOIN / KEY / LEFT / LIKE / LIMIT / MATCH / NATURAL /
-    NO / NOT / NOTNULL / NULL / OF / OFFSET / ON / OR / ORDER /
+    NO / NOT / NOTNULL / NULL / NTILE / OF / OFFSET / ON / OR / ORDER / OVER /
     OUTER / OUTPUT / PLAN / PRAGMA / PRIMARY / QUERY / RAISE / RECURSIVE /
     REFERENCES / REGEXP / REINDEX / RELEASE / RENAME / REPLACE /
     RESTRICT / RIGHT / ROLLBACK / ROW / SAVEPOINT / SELECT /

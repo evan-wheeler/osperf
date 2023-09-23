@@ -1,6 +1,5 @@
 var Module = require("../module"),
   Q = require("q"),
-  fs = require("fs"),
   async = require("async"),
   _ = require("lodash"),
   walk = require("../walk"),
@@ -39,7 +38,9 @@ function processFiles(srcFiles, params) {
   ).then(combine);
 }
 
-const queryRe = /(IsOracle|IsMSSQL)\(/gi;
+let count = 0;
+
+const queryRe = /(IsOracle|IsMSSQL)[ ]*\(/gi;
 
 function searchFn(n) {}
 
@@ -61,7 +62,8 @@ function processEach(params, file, done) {
         done(null, { result: [] });
         return;
       } else {
-        console.log("Found a result: ", file);
+        count++;
+        console.log(`${count} - Found result : ${file}`);
         console.log("    ");
 
         // just return the block & function data.

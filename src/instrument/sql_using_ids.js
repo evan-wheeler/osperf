@@ -1,5 +1,5 @@
 const cmp = require("../compare"),
-  cfg = require("../instrument/cfg"),
+  cfg = require("./cfg"),
   fixQuery = require("../query"),
   getStaticStr = require("../staticval").getStaticStr,
   Bannockburn = require("bannockburn"),
@@ -28,9 +28,17 @@ const getQueryStmt = (node) => {
 
   if (objVal === "capi" && n.arguments && n.arguments.length > 1) {
     if (propertyVal === "exec") {
-      return { type: "CAPI.Exec", statement: n.arguments[1] };
+      return {
+        type: "CAPI.Exec",
+        statement: n.arguments[1],
+        args: n.arguments.slice(2),
+      };
     } else if (propertyVal === "execn") {
-      return { type: "CAPI.ExecN", statement: n.arguments[1] };
+      return {
+        type: "CAPI.ExecN",
+        statement: n.arguments[1],
+        args: [n.arguments[2]],
+      };
     }
     return null;
   }
@@ -44,7 +52,11 @@ const getQueryStmt = (node) => {
     n.arguments.length > 1
   ) {
     // same semantics -- just use execsql
-    return { type: "ExecSQL", statement: n.arguments[1] };
+    return {
+      type: "ExecSQL",
+      statement: n.arguments[1],
+      args: n.arguments.slice(2),
+    };
   } else if (
     propertyVal === "exec" &&
     objVal &&
@@ -52,7 +64,11 @@ const getQueryStmt = (node) => {
     n.arguments.length > 0
   ) {
     // prgCtx and dbConnect both have an exec function...
-    return { type: "Exec", statement: n.arguments[0] };
+    return {
+      type: "Exec",
+      statement: n.arguments[0],
+      args: n.arguments.slice(1),
+    };
   }
 
   return null;
@@ -167,30 +183,21 @@ const asURL = (f) => {
   return `${f}`;
 };
 
-const hasAnnotation = (node, tag) => {
-  if (node && node.annotation) {
-    // accomodate the annotation's bad initial design.
-    const fullTag = node.annotation.tag + node.annotation.value;
-    const tags = fullTag.replace(/ /g, "").split(",");
-    return typeof tags.find((t) => t === tag) !== "undefined";
-  }
-};
-
 // return true if any of the annotations in the list are set
 const hasAnnotationsAny = (node, tagList) => {
   if (node && node.annotation) {
     // accomodate the annotation's bad initial design.
     const fullTag = node.annotation.tag + node.annotation.value;
     const tags = fullTag.replace(/ /g, "").split(",");
-    return tags.indexOf((t) => tagList.indexOf(t) >= 0) >= 0;
+    return typeof tags.indexOf((t) => tagList.indexOf(t) >= 0) >= 0;
   }
 };
 
 const NoCheckDirective = (node) => {
-  return hasAnnotationsAny(node, ["sqlnocheck", "nosqlcheck"]);
+  return hasAnnotationsAny(node, ["sqlidnocheck"]);
 };
 
-module.exports = function fixSQLCase(src, ast, file) {
+module.exports = function sql_using_ids(src, ast, file) {
   var __CUR_OSCRIPT__ = asURL(file),
     __CUR_QUERY__ = "";
 
@@ -336,26 +343,16 @@ module.exports = function fixSQLCase(src, ast, file) {
         if (node.arguments.length === 3) {
           const bindVals = getNode(node.arguments[2]);
 
-          if (bindVals.type !== "ListExpression") {
-            const varName = bindVals.arity === "name" ? bindVals.value : "";
-
-            if (
-              [
-                "bindvars",
-                "noderecs",
-                "vals",
-                "params",
-                "recs",
-                "insertrecs",
-                "args",
-                "bindvals",
-              ].indexOf(varName.toLowerCase()) === -1
-            ) {
-              console.warn(">>>>>> Might be a problem: ", nodeCode);
-            }
+          if (bindVals.type === "ListExpression") {
+            // check all bind variables to see if they may be dynamically typed or
+            // ID fields that could still be strings from the XML import files.
+            let staticVal = getStaticStr(arg, {});
+            debugger;
           }
         }
       }
+
+      /*
 
       // try to compute the argument statically without knowing
       // possible values of variables.
@@ -445,13 +442,16 @@ module.exports = function fixSQLCase(src, ast, file) {
           return;
         }
       }
+      */
 
-      stats.unsolved++;
+      // stats.unsolved++;
+      /*
       statusMsg(
         `           #### NO SOLUTIONS ####: "${asURL(file)}:${
           node.loc.start.line
         }"`
       );
+      */
     }
   });
 

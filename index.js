@@ -9,8 +9,11 @@ var program = require("commander"),
   unusedCmd = require("./src/commands/unused"),
   searchCmd = require("./src/commands/search"),
   fixcaseCmd = require("./src/commands/fixcase"),
-  testCmd = require("./src/commands/test"),
-  buildSchema = require("./src/commands/schema");
+  findSQLAliasesCmd = require("./src/commands/find_aliases_sql"),
+  sqlUsingIDsCmd = require("./src/commands/sql_using_ids"),
+  postgresCmd = require("./src/commands/postgres");
+(testCmd = require("./src/commands/test")),
+  (buildSchema = require("./src/commands/schema"));
 
 var VERSION = "0.0.1";
 
@@ -56,6 +59,16 @@ program
   .action(searchCmd);
 
 program
+  .command("postgres <modules...>")
+  .description("Check for postgreSQL support")
+  .option(
+    "-b, --base <path>",
+    "Use base source control directory",
+    "c:/opentext/sharedsc/"
+  )
+  .action(postgresCmd);
+
+program
   .command("fixcase <modules...>")
   .description("Fix table name case in sql statements for modules")
   .option(
@@ -65,6 +78,28 @@ program
   )
   .option("-p, --pattern <filename>", "Filter files by pattern")
   .action(fixcaseCmd);
+
+program
+  .command("find_aliases_sql <modules...>")
+  .description("Find SQL statements that use certain aliases")
+  .option(
+    "-b, --base <path>",
+    "Use base source control directory",
+    "c:/opentext/sharedsc/"
+  )
+  .option("-p, --pattern <filename>", "Filter files by pattern")
+  .action(findSQLAliasesCmd);
+
+program
+  .command("sql_using_ids <modules...>")
+  .description("Find SQL statements that use variables likely containing IDs")
+  .option(
+    "-b, --base <path>",
+    "Use base source control directory",
+    "c:/opentext/sharedsc/"
+  )
+  .option("-p, --pattern <filename>", "Filter files by pattern")
+  .action(sqlUsingIDsCmd);
 
 program.command("test <file>").description("Test search").action(testCmd);
 

@@ -1,5 +1,5 @@
 const cmp = require("../compare"),
-  cfg = require("../instrument/cfg"),
+  cfg = require("./cfg"),
   fixQuery = require("../query"),
   getStaticStr = require("../staticval").getStaticStr,
   Bannockburn = require("bannockburn"),
@@ -167,22 +167,13 @@ const asURL = (f) => {
   return `${f}`;
 };
 
-const hasAnnotation = (node, tag) => {
-  if (node && node.annotation) {
-    // accomodate the annotation's bad initial design.
-    const fullTag = node.annotation.tag + node.annotation.value;
-    const tags = fullTag.replace(/ /g, "").split(",");
-    return typeof tags.find((t) => t === tag) !== "undefined";
-  }
-};
-
 // return true if any of the annotations in the list are set
 const hasAnnotationsAny = (node, tagList) => {
   if (node && node.annotation) {
     // accomodate the annotation's bad initial design.
     const fullTag = node.annotation.tag + node.annotation.value;
     const tags = fullTag.replace(/ /g, "").split(",");
-    return tags.indexOf((t) => tagList.indexOf(t) >= 0) >= 0;
+    return typeof tags.indexOf((t) => tagList.indexOf(t) >= 0) >= 0;
   }
 };
 
@@ -190,7 +181,7 @@ const NoCheckDirective = (node) => {
   return hasAnnotationsAny(node, ["sqlnocheck", "nosqlcheck"]);
 };
 
-module.exports = function fixSQLCase(src, ast, file) {
+module.exports = function sqlaliases(src, ast, file) {
   var __CUR_OSCRIPT__ = asURL(file),
     __CUR_QUERY__ = "";
 
